@@ -1,0 +1,21 @@
+# Gradle / build
+.gradle/
+.kotlin/
+build/
+**/build/
+
+# Local config (contiene la ruta del SDK de esta máquina)
+local.properties
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Firma de la app: NUNCA versionar keystores ni sus contraseñas
+*.jks
+*.keystore
+keystore.properties
