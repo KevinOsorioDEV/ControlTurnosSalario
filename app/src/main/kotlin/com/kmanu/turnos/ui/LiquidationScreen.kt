@@ -17,7 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -66,7 +66,7 @@ fun LiquidationScreen(state: UiState, viewModel: AppViewModel) {
             } else {
                 val result = remember(state, page) { state.copy(period = pagePeriod).liquidation }
                 Column(
-                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                    Modifier.fillMaxSize().topFade().verticalScroll(rememberScrollState()).padding(horizontal = Spacing.md, vertical = Spacing.sm),
                     verticalArrangement = Arrangement.spacedBy(Spacing.ms),
                 ) {
                     NetCard(result)
@@ -122,7 +122,7 @@ fun CalculationCard(
         Column(Modifier.padding(Spacing.md)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Cómo se calculó", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                Icon(Icons.Filled.ExpandMore, contentDescription = null, modifier = Modifier.rotate(rotation))
+                Icon(Icons.Rounded.ExpandMore, contentDescription = null, modifier = Modifier.rotate(rotation))
             }
             AnimatedVisibility(
                 visible = open,

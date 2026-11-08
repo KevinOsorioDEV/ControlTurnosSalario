@@ -1,6 +1,7 @@
 package com.kmanu.turnos.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -9,20 +10,21 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import com.kmanu.turnos.data.UserSettings
@@ -33,6 +35,7 @@ import com.kmanu.turnos.domain.PayPeriod
 import com.kmanu.turnos.domain.PayrollCalculator
 import com.kmanu.turnos.ui.theme.Sizes
 import com.kmanu.turnos.ui.theme.Spacing
+import com.kmanu.turnos.ui.theme.tabular
 import java.math.BigDecimal
 
 /** Lo escrito para un corte. `null` significa que el campo sigue con su valor sugerido. */
@@ -47,26 +50,45 @@ data class ManualDraft(
 
 private const val FULL_MONTH_DAYS = 30
 private val HUNDRED = BigDecimal(100)
+private val HALF_HOUR = BigDecimal("0.5")
 
-/** Los conceptos del Excel; el pago sin compensatorio solo aplica a turnos marcados. */
-private val ENTRY_CONCEPTS = Concept.entries - Concept.SUNDAY_NO_REST
+private class HoursGroup(val title: String, val entries: List<Pair<Concept, String>>)
+
+/** Los conceptos del Excel por grupos; el pago sin compensatorio solo aplica a turnos marcados. */
+private val HOUR_GROUPS = listOf(
+    HoursGroup("Horas extra", listOf(Concept.EXTRA_DAY to "Extra de día", Concept.EXTRA_NIGHT to "Extra de noche")),
+    HoursGroup(
+        "Domingo o festivo",
+        listOf(
+            Concept.SUNDAY_DAY to "Recargo de día",
+            Concept.SUNDAY_NIGHT to "Recargo de noche",
+            Concept.EXTRA_DAY_SUNDAY to "Extra de día",
+            Concept.EXTRA_NIGHT_SUNDAY to "Extra de noche",
+        ),
+    ),
+    HoursGroup("Recargo de noche", listOf(Concept.NIGHT to "Noche normal")),
+)
 
 private fun String.decimalOrNull(): BigDecimal? = replace(',', '.').toBigDecimalOrNull()
 private fun String.keepDecimal(): String = filter { it.isDigit() || it == ',' || it == '.' }
 private fun String.keepDigits(): String = filter(Char::isDigit)
 
-@OptIn(ExperimentalMaterial3Api::class)
+private fun BigDecimal.hoursText(): String = stripTrailingZeros().toPlainString().replace('.', ',')
+
+/** Suma [delta] a las horas escritas; en cero el campo queda vacío y vuelve a mostrar el 0 tenue. */
+private fun String.stepped(delta: BigDecimal): String {
+    val next = ((decimalOrNull() ?: BigDecimal.ZERO) + delta).max(BigDecimal.ZERO)
+    return if (next.signum() == 0) "" else next.hoursText()
+}
+
 @Composable
 fun LiquidationModeSelector(manual: Boolean, onChange: (Boolean) -> Unit) {
-    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(top = Spacing.sm)) {
-        listOf("Mis turnos" to false, "Ingresar horas" to true).forEachIndexed { index, (label, value) ->
-            SegmentedButton(
-                selected = manual == value,
-                onClick = { onChange(value) },
-                shape = SegmentedButtonDefaults.itemShape(index, 2),
-            ) { Text(label) }
-        }
-    }
+    PillTabs(
+        options = listOf("Mis turnos", "Ingresar horas"),
+        selected = if (manual) 1 else 0,
+        onSelect = { onChange(it == 1) },
+        modifier = Modifier.fillMaxWidth().padding(top = Spacing.sm),
+    )
 }
 
 @Composable
@@ -81,6 +103,8 @@ fun ManualLiquidation(
     val rules = remember(period) { LaborRules.at(period.noveltiesTo) }
     val changesInCut = remember(period) { LaborRules.at(period.noveltiesFrom) != rules }
     val suggestedPercent = remember(rules) { rules.sundayRate.multiply(HUNDRED).stripTrailingZeros().toPlainString() }
+    var openGroup by rememberSaveable { mutableStateOf<String?>(HOUR_GROUPS.first().title) }
+    var dataOpen by rememberSaveable { mutableStateOf(false) }
 
     val salaryText = draft.salary ?: settings.monthlySalary.toString()
     val allowanceText = draft.allowance ?: settings.monthlyAllowance.toString()
@@ -93,6 +117,7 @@ fun ManualLiquidation(
     val days = daysText.toIntOrNull()?.takeIf { it in 0..FULL_MONTH_DAYS }
     val percent = percentText.decimalOrNull()
     val divisor = divisorText.toIntOrNull()?.takeIf { it > 0 }
+    val anyDataInvalid = salary == null || allowance == null || days == null || percent == null || divisor == null
 
     val input = ManualInput(
         monthlySalary = salary ?: settings.monthlySalary,
@@ -104,48 +129,79 @@ fun ManualLiquidation(
     )
     val result = remember(input, period) { PayrollCalculator.liquidateManual(input, period) }
 
-    Column(
-        Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState())
-            .padding(horizontal = Spacing.md, vertical = Spacing.sm),
-        verticalArrangement = Arrangement.spacedBy(Spacing.ms),
-    ) {
-        NetCard(result, showProgressNote = false)
+    fun setHours(concept: Concept, text: String) {
+        val hours = if (text.isEmpty()) draft.hours - concept else draft.hours + (concept to text)
+        onDraftChange(draft.copy(hours = hours))
+    }
 
-        TurnosCard {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Horas del corte", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                if (draft != ManualDraft()) {
-                    TextButton(onClick = { onDraftChange(ManualDraft()) }) { Text("Limpiar") }
-                }
-            }
-            ENTRY_CONCEPTS.forEach { concept ->
-                HoursRow(
-                    concept = concept,
-                    hourValue = PayrollCalculator.hourValue(input.monthlySalary, input.monthlyHours, concept, input.sundayRate),
-                    value = draft.hours[concept].orEmpty(),
-                    onChange = { onDraftChange(draft.copy(hours = draft.hours + (concept to it.keepDecimal()))) },
-                )
-            }
+    Column(Modifier.fillMaxSize().imePadding()) {
+        // El neto se queda arriba: se ve cambiar mientras se ingresan las horas.
+        Box(Modifier.padding(start = Spacing.md, end = Spacing.md, top = Spacing.sm)) {
+            NetCard(result, showProgressNote = false)
         }
+        Column(
+            Modifier
+                .weight(1f)
+                .topFade()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            if (draft != ManualDraft()) {
+                TextButton(onClick = { onDraftChange(ManualDraft()) }, Modifier.align(Alignment.End)) { Text("Limpiar todo") }
+            }
 
-        TurnosCard {
-            Text("Datos de este corte", style = MaterialTheme.typography.titleMedium)
-            Column(Modifier.padding(top = Spacing.sm), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                ManualField("Salario mensual", salaryText, salary == null, KeyboardType.Number) {
-                    onDraftChange(draft.copy(salary = it.keepDigits()))
+            HOUR_GROUPS.forEach { group ->
+                val total = group.entries.fold(BigDecimal.ZERO) { sum, (concept, _) ->
+                    sum + (draft.hours[concept]?.decimalOrNull() ?: BigDecimal.ZERO)
                 }
-                ManualField("Auxilio de conectividad mensual", allowanceText, allowance == null, KeyboardType.Number) {
-                    onDraftChange(draft.copy(allowance = it.keepDigits()))
+                AccordionCard(
+                    title = group.title,
+                    summary = if (total.signum() > 0) "${total.hoursText()} h" else null,
+                    open = openGroup == group.title,
+                    onToggle = { openGroup = if (openGroup == group.title) null else group.title },
+                ) {
+                    group.entries.forEach { (concept, label) ->
+                        HoursRow(
+                            label = label,
+                            hourValue = PayrollCalculator.hourValue(input.monthlySalary, input.monthlyHours, concept, input.sundayRate),
+                            value = draft.hours[concept].orEmpty(),
+                            onChange = { setHours(concept, it.keepDecimal()) },
+                        )
+                    }
                 }
-                ManualField("Días trabajados (máximo 30)", daysText, days == null, KeyboardType.Number) {
-                    onDraftChange(draft.copy(days = it.keepDigits()))
-                }
-                ManualField("Recargo dominical y festivo (%)", percentText, percent == null, KeyboardType.Decimal) {
-                    onDraftChange(draft.copy(sundayPercent = it.keepDecimal()))
-                }
-                ManualField("Divisor de horas del mes", divisorText, divisor == null, KeyboardType.Number) {
-                    onDraftChange(draft.copy(monthlyHours = it.keepDigits()))
-                }
+            }
+
+            AccordionCard(
+                title = "Datos de este corte",
+                open = dataOpen || anyDataInvalid,
+                onToggle = { dataOpen = !dataOpen },
+            ) {
+                FilledField(
+                    salaryText,
+                    { onDraftChange(draft.copy(salary = it.keepDigits())) },
+                    "Salario mensual",
+                    isError = salary == null,
+                    prefix = "$",
+                    transformation = ThousandsTransformation,
+                )
+                FilledField(
+                    allowanceText,
+                    { onDraftChange(draft.copy(allowance = it.keepDigits())) },
+                    "Auxilio de conectividad mensual",
+                    isError = allowance == null,
+                    prefix = "$",
+                    transformation = ThousandsTransformation,
+                )
+                FilledField(daysText, { onDraftChange(draft.copy(days = it.keepDigits())) }, "Días trabajados (máximo 30)", isError = days == null)
+                FilledField(
+                    percentText,
+                    { onDraftChange(draft.copy(sundayPercent = it.keepDecimal())) },
+                    "Recargo dominical y festivo (%)",
+                    isError = percent == null,
+                    keyboard = KeyboardType.Decimal,
+                )
+                FilledField(divisorText, { onDraftChange(draft.copy(monthlyHours = it.keepDigits())) }, "Divisor de horas del mes", isError = divisor == null)
                 if (changesInCut) {
                     Text(
                         "En este corte cambió la ley. Sugerimos los valores vigentes al ${period.noveltiesTo.shortLabel()}; " +
@@ -155,55 +211,50 @@ fun ManualLiquidation(
                     )
                 }
             }
-        }
 
-        CalculationCard(result, open = detailOpen, onToggle = onToggleDetail, workedLabel = "Horas con recargo o extra")
+            CalculationCard(result, open = detailOpen, onToggle = onToggleDetail, workedLabel = "Horas con recargo o extra")
+        }
     }
 }
 
 @Composable
-private fun HoursRow(concept: Concept, hourValue: Long, value: String, onChange: (String) -> Unit) {
+private fun HoursRow(label: String, hourValue: Long, value: String, onChange: (String) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val invalid = value.isNotEmpty() && value.decimalOrNull() == null
+    val style = MaterialTheme.typography.titleMedium.tabular().copy(
+        textAlign = TextAlign.Center,
+        color = if (invalid) scheme.error else scheme.onSurface,
+    )
     Row(
-        Modifier.fillMaxWidth().padding(vertical = Spacing.xs),
+        Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(concept.label, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                "${money(hourValue)} por hora",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Text("${money(hourValue)} por hora", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+        }
+        Stepper(
+            onDecrease = { onChange(value.stepped(-HALF_HOUR)) },
+            onIncrease = { onChange(value.stepped(HALF_HOUR)) },
+            decreaseLabel = "Media hora menos de $label",
+            increaseLabel = "Media hora más de $label",
+        ) {
+            BasicTextField(
+                value = value,
+                onValueChange = onChange,
+                modifier = Modifier.width(Sizes.counterValue),
+                singleLine = true,
+                textStyle = style,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                cursorBrush = SolidColor(scheme.primary),
+                decorationBox = { field ->
+                    Box(contentAlignment = Alignment.Center) {
+                        if (value.isEmpty()) Text("0", style = style.copy(color = scheme.onSurfaceVariant))
+                        field()
+                    }
+                },
             )
         }
-        OutlinedTextField(
-            value = value,
-            onValueChange = onChange,
-            placeholder = { Text("0", Modifier.fillMaxWidth(), textAlign = TextAlign.End) },
-            isError = value.isNotEmpty() && value.decimalOrNull() == null,
-            singleLine = true,
-            textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = TextAlign.End),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            modifier = Modifier.width(Sizes.hoursField),
-        )
     }
-}
-
-@Composable
-private fun ManualField(
-    label: String,
-    value: String,
-    invalid: Boolean,
-    keyboard: KeyboardType,
-    onChange: (String) -> Unit,
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onChange,
-        label = { Text(label) },
-        isError = invalid,
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = keyboard),
-        modifier = Modifier.fillMaxWidth(),
-    )
 }

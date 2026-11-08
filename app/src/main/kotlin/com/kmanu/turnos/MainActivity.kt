@@ -14,15 +14,18 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccessTime
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Payments
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.rounded.AccountBalanceWallet
+import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ShortNavigationBar
+import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -46,11 +49,11 @@ import com.kmanu.turnos.ui.ShiftScreen
 import com.kmanu.turnos.ui.theme.Motion
 import com.kmanu.turnos.ui.theme.TurnosTheme
 
-private enum class Tab(val label: String, val icon: ImageVector) {
-    SHIFT("Turno", Icons.Filled.AccessTime),
-    HISTORY("Historial", Icons.Filled.History),
-    LIQUIDATION("Liquidación", Icons.Filled.Payments),
-    SETTINGS("Ajustes", Icons.Filled.Settings),
+private enum class Tab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
+    SHIFT("Turno", Icons.Outlined.Schedule, Icons.Rounded.Schedule),
+    HISTORY("Historial", Icons.Outlined.CalendarMonth, Icons.Rounded.CalendarMonth),
+    LIQUIDATION("Liquidación", Icons.Outlined.AccountBalanceWallet, Icons.Rounded.AccountBalanceWallet),
+    SETTINGS("Ajustes", Icons.Rounded.Tune, Icons.Rounded.Tune),
 }
 
 class MainActivity : ComponentActivity() {
@@ -81,12 +84,12 @@ private fun TurnosApp(viewModel: AppViewModel = viewModel(factory = AppViewModel
         bottomBar = {
             // El editor ocupa la pantalla: sin barra no se puede salir de él perdiendo los cambios.
             if (!editorOpen) {
-                NavigationBar {
+                ShortNavigationBar {
                     Tab.entries.forEach { item ->
-                        NavigationBarItem(
+                        ShortNavigationBarItem(
                             selected = tab == item,
                             onClick = { tab = item },
-                            icon = { Icon(item.icon, contentDescription = null) },
+                            icon = { Icon(if (tab == item) item.selectedIcon else item.icon, contentDescription = null) },
                             label = { Text(item.label) },
                         )
                     }

@@ -17,17 +17,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -40,7 +36,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.input.KeyboardType
 import com.kmanu.turnos.domain.PayrollCalculator
 import com.kmanu.turnos.domain.Shift
 import com.kmanu.turnos.domain.ShiftBreakdown
@@ -177,39 +172,31 @@ private fun CheckInContent(state: UiState, now: LocalDateTime, onCheckIn: (Local
                     Text(endTime.label(), style = MaterialTheme.typography.headlineLarge.tabular())
                     Text(day, style = MaterialTheme.typography.bodyMedium, color = muted)
                 }
-                Icon(Icons.Filled.Edit, contentDescription = "Cambiar hora de salida", tint = muted)
+                Icon(Icons.Rounded.Edit, contentDescription = "Cambiar hora de salida", tint = muted)
             }
         }
         if (state.frequentEndTimes.isNotEmpty()) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+            ) {
                 state.frequentEndTimes.forEach { time ->
-                    FilterChip(
-                        selected = time == endTime,
-                        onClick = { chosenEnd = time },
-                        label = { Text(time.label()) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                        ),
-                    )
+                    PillChip(time.label(), selected = time == endTime, onClick = { chosenEnd = time })
                 }
             }
         }
         if (policy.minutes > 0) {
-            OutlinedTextField(
+            FilledField(
                 value = breakText,
                 onValueChange = { breakOverride = it.filter(Char::isDigit) },
-                label = { Text("Almuerzo no pagado (minutos)") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth(),
+                label = "Almuerzo no pagado (minutos)",
             )
         }
         PrimaryAction("Marcar entrada", onClick = { onCheckIn(scheduledEnd, breakText.toIntOrNull() ?: 0) })
     }
 
     if (picking) {
-        TimePickerDialog(endTime, { picking = false }) {
+        TimeGridSheet("¿A qué hora sales?", endTime, { picking = false }) {
             chosenEnd = it
             picking = false
         }
@@ -224,10 +211,13 @@ private fun OpenShiftContent(hero: Hero.Open, salary: Long, now: LocalDateTime, 
     val style = hero.style()
     var confirming by remember { mutableStateOf(false) }
     if (confirming) {
+        // Hora del momento de confirmar: la de la pantalla puede tener hasta 15 segundos de atraso.
+        val exit = remember { LocalDateTime.now() }
+        val workedUntilExit = PayrollCalculator.breakdown(shift, salary, until = exit).workedMinutes
         AlertDialog(
             onDismissRequest = { confirming = false },
             title = { Text("¿Marcar salida?") },
-            text = { Text("Cerrarás el turno a las ${now.timeLabel()} con ${hours(breakdown.workedMinutes)} trabajadas.") },
+            text = { Text("Cerrarás el turno a las ${exit.timeLabel()} con ${hours(workedUntilExit)} trabajadas.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirming = false

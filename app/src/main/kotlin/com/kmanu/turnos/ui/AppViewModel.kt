@@ -20,6 +20,7 @@ import com.kmanu.turnos.domain.PaySettings
 import com.kmanu.turnos.domain.PayrollCalculator
 import com.kmanu.turnos.domain.Shift
 import com.kmanu.turnos.domain.ShiftValidation
+import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -64,7 +65,21 @@ data class UiState(
         .take(4)
         .map { it.key }
         .sorted()
+
+    /** Horarios completos más repetidos, para registrar un turno con un toque. */
+    val frequentShifts: List<Pair<LocalTime, LocalTime>> = shifts
+        .mapNotNull { shift -> shift.end?.let { shift.start to it } }
+        .filter { (start, end) -> Duration.between(start, end).toMinutes() >= MIN_FREQUENT_SHIFT_MINUTES }
+        .groupingBy { (start, end) -> start.toLocalTime() to end.toLocalTime() }
+        .eachCount()
+        .entries
+        .sortedByDescending { it.value }
+        .take(MAX_FREQUENT_SHIFTS)
+        .map { it.key }
 }
+
+private const val MIN_FREQUENT_SHIFT_MINUTES = 60L
+private const val MAX_FREQUENT_SHIFTS = 3
 
 class AppViewModel(
     private val repository: ShiftRepository,

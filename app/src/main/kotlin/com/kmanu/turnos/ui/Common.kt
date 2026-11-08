@@ -8,21 +8,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,6 +59,7 @@ private val symbols = DecimalFormatSymbols(locale).apply {
 private val timeFormat = DateTimeFormatter.ofPattern("h:mm a", Locale.US)
 private val dateFormat = DateTimeFormatter.ofPattern("EEE d MMM", locale)
 private val shortDateFormat = DateTimeFormatter.ofPattern("d MMM", locale)
+private val dayFormat = DateTimeFormatter.ofPattern("EEE d", locale)
 private val monthFormat = DateTimeFormatter.ofPattern("MMMM yyyy", locale)
 
 fun money(value: Long): String = (if (value < 0) "-$" else "$") + DecimalFormat("#,##0", symbols).format(abs(value))
@@ -78,6 +75,7 @@ fun hours(minutes: Long): String {
 fun LocalTime.label(): String = format(timeFormat)
 fun LocalDate.label(): String = format(dateFormat)
 fun LocalDate.shortLabel(): String = format(shortDateFormat)
+fun LocalDate.dayLabel(): String = format(dayFormat).replaceFirstChar { it.uppercase(locale) }
 fun LocalDateTime.timeLabel(): String = toLocalTime().label()
 
 fun PayPeriod.title(): String = month.format(monthFormat).replaceFirstChar { it.uppercase(locale) }
@@ -121,7 +119,7 @@ fun PeriodSelector(pager: PagerState, cutoffDay: Int) {
     val period = periodAt(pager.currentPage, cutoffDay)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = { scope.launch { pager.animateScrollToPage(pager.currentPage - 1, animationSpec = Motion.standard()) } }) {
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Corte anterior")
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "Corte anterior")
         }
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(period.title(), style = MaterialTheme.typography.titleMedium)
@@ -132,7 +130,7 @@ fun PeriodSelector(pager: PagerState, cutoffDay: Int) {
             )
         }
         IconButton(onClick = { scope.launch { pager.animateScrollToPage(pager.currentPage + 1, animationSpec = Motion.standard()) } }) {
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Corte siguiente")
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Corte siguiente")
         }
     }
 }
@@ -170,18 +168,6 @@ fun AmountRow(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TimePickerDialog(initial: LocalTime, onDismiss: () -> Unit, onConfirm: (LocalTime) -> Unit) {
-    val state = rememberTimePickerState(initial.hour, initial.minute, is24Hour = false)
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = { onConfirm(LocalTime.of(state.hour, state.minute)) }) { Text("Aceptar") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
-        text = { TimePicker(state = state) },
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
 fun DatePickerHost(initial: LocalDate, onDismiss: () -> Unit, onConfirm: (LocalDate) -> Unit) {
     val state = rememberDatePickerState(
         initialSelectedDateMillis = initial.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
@@ -197,30 +183,4 @@ fun DatePickerHost(initial: LocalDate, onDismiss: () -> Unit, onConfirm: (LocalD
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     ) { DatePicker(state = state) }
-}
-
-/** Fila con botones independientes para cambiar la fecha y la hora. */
-@Composable
-fun DateTimeField(label: String, value: LocalDateTime, onChange: (LocalDateTime) -> Unit) {
-    var pickingDate by remember { mutableStateOf(false) }
-    var pickingTime by remember { mutableStateOf(false) }
-    Column {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-            OutlinedButton(onClick = { pickingDate = true }, Modifier.weight(1f)) { Text(value.toLocalDate().label()) }
-            OutlinedButton(onClick = { pickingTime = true }, Modifier.weight(1f)) { Text(value.timeLabel()) }
-        }
-    }
-    if (pickingDate) {
-        DatePickerHost(value.toLocalDate(), { pickingDate = false }) {
-            onChange(it.atTime(value.toLocalTime()))
-            pickingDate = false
-        }
-    }
-    if (pickingTime) {
-        TimePickerDialog(value.toLocalTime(), { pickingTime = false }) {
-            onChange(value.toLocalDate().atTime(it))
-            pickingTime = false
-        }
-    }
 }

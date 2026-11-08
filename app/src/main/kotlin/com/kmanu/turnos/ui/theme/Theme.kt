@@ -96,6 +96,7 @@ private val DarkColors = darkColorScheme(
 )
 
 private val TurnosShapes = Shapes(
+    extraSmall = RoundedCornerShape(Radius.control),
     small = RoundedCornerShape(Radius.pill),
     medium = RoundedCornerShape(Radius.card),
     large = RoundedCornerShape(Radius.hero),

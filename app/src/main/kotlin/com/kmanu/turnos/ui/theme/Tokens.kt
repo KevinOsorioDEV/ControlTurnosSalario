@@ -28,7 +28,11 @@ object Radius {
 
 object Sizes {
     val action = 56.dp
-    val hoursField = 96.dp
+    val chip = 40.dp
+    val chipIcon = 18.dp
+    val gridCell = 44.dp
+    val counterValue = 52.dp
+    val focusBorder = 2.dp
 }
 
 /** Toda la app se mueve con las mismas duraciones y la misma curva. */
