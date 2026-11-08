@@ -53,25 +53,37 @@ data class PaySettings(
 )
 
 /**
- * Liquidación de un mes: salario del mes más las novedades del 16 del mes anterior al 15 de
- * este mes, pagadas al final del mes.
+ * Liquidación de un mes: salario del mes más las novedades desde el día siguiente al corte del
+ * mes anterior hasta el corte de este mes, pagadas al final del mes.
+ *
+ * @property cutoffDay último día de novedades de cada corte. En los meses que no tienen ese día,
+ * el corte es el último del mes, de modo que los cortes siguen siendo continuos.
  */
-data class PayPeriod(val month: YearMonth) {
-    val noveltiesFrom: LocalDate get() = month.minusMonths(1).atDay(CUTOFF_DAY + 1)
-    val noveltiesTo: LocalDate get() = month.atDay(CUTOFF_DAY)
+data class PayPeriod(val month: YearMonth, val cutoffDay: Int = DEFAULT_CUTOFF_DAY) {
+    init {
+        require(cutoffDay in MIN_CUTOFF_DAY..MAX_CUTOFF_DAY) { "Día de corte inválido: $cutoffDay" }
+    }
+
+    val noveltiesFrom: LocalDate get() = cutoffDate(month.minusMonths(1), cutoffDay).plusDays(1)
+    val noveltiesTo: LocalDate get() = cutoffDate(month, cutoffDay)
     val payday: LocalDate get() = month.atEndOfMonth()
 
     operator fun contains(date: LocalDate): Boolean = date in noveltiesFrom..noveltiesTo
-    fun next() = PayPeriod(month.plusMonths(1))
-    fun previous() = PayPeriod(month.minusMonths(1))
+    fun next() = copy(month = month.plusMonths(1))
+    fun previous() = copy(month = month.minusMonths(1))
 
     companion object {
-        const val CUTOFF_DAY = 15
+        const val DEFAULT_CUTOFF_DAY = 15
+        const val MIN_CUTOFF_DAY = 1
+        const val MAX_CUTOFF_DAY = 31
+
+        private fun cutoffDate(month: YearMonth, cutoffDay: Int): LocalDate =
+            month.atDay(minOf(cutoffDay, month.lengthOfMonth()))
 
         /** Corte al que pertenecen las horas trabajadas en [date]. */
-        fun containing(date: LocalDate): PayPeriod {
+        fun containing(date: LocalDate, cutoffDay: Int = DEFAULT_CUTOFF_DAY): PayPeriod {
             val month = YearMonth.from(date)
-            return PayPeriod(if (date.dayOfMonth <= CUTOFF_DAY) month else month.plusMonths(1))
+            return PayPeriod(if (date <= cutoffDate(month, cutoffDay)) month else month.plusMonths(1), cutoffDay)
         }
     }
 }
@@ -98,9 +110,23 @@ data class Liquidation(
     val net: Long,
 )
 
+/**
+ * Datos de una liquidación manual: las horas ya totalizadas por concepto, como en el Excel.
+ * [monthlyHours] y [sundayRate] se indican aparte porque un corte puede cruzar un cambio de ley.
+ */
+data class ManualInput(
+    val monthlySalary: Long,
+    val monthlyAllowance: Long,
+    val daysWorked: Int,
+    val monthlyHours: Int,
+    val sundayRate: BigDecimal,
+    val hours: Map<Concept, BigDecimal>,
+)
+
 object PayrollCalculator {
     private val HEALTH_AND_PENSION = BigDecimal("0.08")
     private val MINUTES_PER_HOUR = BigDecimal(60)
+    private const val DAYS_PER_MONTH = 30
 
     private data class Bucket(val concept: Concept, val rules: LaborRules)
 
@@ -129,6 +155,56 @@ object PayrollCalculator {
             net = earned + settings.monthlyAllowance - deduction,
         )
     }
+
+    /** Valor de una hora de [concept]; el salario base es siempre el mensual completo. */
+    fun hourValue(monthlySalary: Long, monthlyHours: Int, concept: Concept, sundayRate: BigDecimal): Long =
+        manualAmount(monthlySalary, monthlyHours, concept, sundayRate, BigDecimal.ONE).setScale(0, RoundingMode.HALF_UP).toLong()
+
+    /** Liquidación a partir de horas ya totalizadas, sin turnos marcados. */
+    fun liquidateManual(input: ManualInput, period: PayPeriod): Liquidation {
+        val lines = input.hours.entries
+            .filter { it.value.signum() > 0 }
+            .sortedBy { it.key.ordinal }
+            .map { (concept, hours) ->
+                ConceptLine(
+                    concept = concept,
+                    minutes = hours.multiply(MINUTES_PER_HOUR).setScale(0, RoundingMode.HALF_UP).toLong(),
+                    amount = manualAmount(input.monthlySalary, input.monthlyHours, concept, input.sundayRate, hours)
+                        .setScale(0, RoundingMode.HALF_UP).toLong(),
+                )
+            }
+        val noveltiesTotal = lines.sumOf { it.amount }
+        val salary = prorate(input.monthlySalary, input.daysWorked)
+        val allowance = prorate(input.monthlyAllowance, input.daysWorked)
+        val earned = salary + noveltiesTotal
+        val deduction = BigDecimal(earned).multiply(HEALTH_AND_PENSION).setScale(0, RoundingMode.HALF_UP).toLong()
+        return Liquidation(
+            period = period,
+            salary = salary,
+            workedMinutes = lines.sumOf { it.minutes },
+            lines = lines,
+            noveltiesTotal = noveltiesTotal,
+            earned = earned,
+            allowance = allowance,
+            healthAndPension = deduction,
+            net = earned + allowance - deduction,
+        )
+    }
+
+    private fun manualAmount(
+        monthlySalary: Long,
+        monthlyHours: Int,
+        concept: Concept,
+        sundayRate: BigDecimal,
+        hours: BigDecimal,
+    ): BigDecimal = BigDecimal(monthlySalary)
+        .multiply(hours)
+        .multiply(concept.factor(sundayRate))
+        .divide(BigDecimal(monthlyHours), 10, RoundingMode.HALF_UP)
+
+    private fun prorate(monthlyValue: Long, days: Int): Long =
+        BigDecimal(monthlyValue).multiply(BigDecimal(days))
+            .divide(BigDecimal(DAYS_PER_MONTH), 0, RoundingMode.HALF_UP).toLong()
 
     private fun accumulate(
         shifts: List<Shift>,

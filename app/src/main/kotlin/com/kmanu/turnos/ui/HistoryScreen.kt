@@ -96,10 +96,10 @@ fun HistoryScreen(state: UiState, viewModel: AppViewModel, onEditorOpenChange: (
                     Column(Modifier.fillMaxSize()) {
                         Column(Modifier.padding(start = Spacing.md, end = Spacing.md, top = Spacing.md)) {
                             Text("Historial", style = MaterialTheme.typography.headlineMedium)
-                            PeriodSelector(pager)
+                            PeriodSelector(pager, state.settings.cutoffDay)
                         }
                         HorizontalPager(pager, Modifier.weight(1f)) { page ->
-                            val pageState = remember(state, page) { state.copy(period = periodAt(page)) }
+                            val pageState = remember(state, page) { state.copy(period = periodAt(page, state.settings.cutoffDay)) }
                             LazyColumn(
                                 Modifier.fillMaxSize(),
                                 state = listStates.getOrPut(page) { LazyListState() },

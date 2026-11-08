@@ -48,23 +48,37 @@ fun LiquidationScreen(state: UiState, viewModel: AppViewModel) {
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(start = Spacing.md, end = Spacing.md, top = Spacing.md)) {
             Text("Liquidación", style = MaterialTheme.typography.headlineMedium)
-            PeriodSelector(pager)
+            LiquidationModeSelector(viewModel.manualMode, onChange = { viewModel.manualMode = it })
+            PeriodSelector(pager, state.settings.cutoffDay)
         }
         HorizontalPager(pager, Modifier.weight(1f)) { page ->
-            val result = remember(state, page) { state.copy(period = periodAt(page)).liquidation }
-            Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Spacing.md, vertical = Spacing.sm),
-                verticalArrangement = Arrangement.spacedBy(Spacing.ms),
-            ) {
-                NetCard(result)
-                CalculationCard(result, open = detailOpen, onToggle = { detailOpen = !detailOpen })
+            val pagePeriod = periodAt(page, state.settings.cutoffDay)
+            if (viewModel.manualMode) {
+                val month = pagePeriod.month
+                ManualLiquidation(
+                    settings = state.settings,
+                    period = pagePeriod,
+                    draft = viewModel.manualDrafts[month] ?: ManualDraft(),
+                    onDraftChange = { viewModel.manualDrafts[month] = it },
+                    detailOpen = detailOpen,
+                    onToggleDetail = { detailOpen = !detailOpen },
+                )
+            } else {
+                val result = remember(state, page) { state.copy(period = pagePeriod).liquidation }
+                Column(
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Spacing.md, vertical = Spacing.sm),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.ms),
+                ) {
+                    NetCard(result)
+                    CalculationCard(result, open = detailOpen, onToggle = { detailOpen = !detailOpen })
+                }
             }
         }
     }
 }
 
 @Composable
-private fun NetCard(result: Liquidation) {
+fun NetCard(result: Liquidation, showProgressNote: Boolean = true) {
     val style = TurnosTheme.colors.closed
     val today = LocalDate.now()
     val payday = result.period.payday.shortLabel()
@@ -80,7 +94,7 @@ private fun NetCard(result: Liquidation) {
                 style = MaterialTheme.typography.titleSmall,
             )
             Text(money(result.net), style = MaterialTheme.typography.displaySmall.tabular())
-            if (today <= result.period.noveltiesTo) {
+            if (showProgressNote && today <= result.period.noveltiesTo) {
                 Text(
                     "Corte en curso: muestra lo acumulado hasta el último turno cerrado.",
                     style = MaterialTheme.typography.bodySmall,
@@ -92,7 +106,12 @@ private fun NetCard(result: Liquidation) {
 }
 
 @Composable
-private fun CalculationCard(result: Liquidation, open: Boolean, onToggle: () -> Unit) {
+fun CalculationCard(
+    result: Liquidation,
+    open: Boolean,
+    onToggle: () -> Unit,
+    workedLabel: String = "Horas trabajadas en el corte",
+) {
     val rotation by animateFloatAsState(if (open) 180f else 0f, Motion.standard(), label = "flecha del detalle")
     Surface(
         onClick = onToggle,
@@ -111,7 +130,7 @@ private fun CalculationCard(result: Liquidation, open: Boolean, onToggle: () -> 
                 exit = shrinkVertically(Motion.standard()) + fadeOut(Motion.standard(Motion.SHORT)),
             ) {
                 Column(Modifier.padding(top = Spacing.sm)) {
-                    AmountRow("Horas trabajadas en el corte", hours(result.workedMinutes))
+                    AmountRow(workedLabel, hours(result.workedMinutes))
                     if (result.lines.isEmpty()) {
                         Text(
                             "Sin recargos ni extras en este corte.",

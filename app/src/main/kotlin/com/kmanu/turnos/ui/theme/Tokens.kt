@@ -28,6 +28,7 @@ object Radius {
 
 object Sizes {
     val action = 56.dp
+    val hoursField = 96.dp
 }
 
 /** Toda la app se mueve con las mismas duraciones y la misma curva. */

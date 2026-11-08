@@ -15,6 +15,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Upsert
 import com.kmanu.turnos.domain.BreakPolicy
+import com.kmanu.turnos.domain.PayPeriod
 import com.kmanu.turnos.domain.Shift
 import java.time.LocalDateTime
 import kotlinx.coroutines.flow.Flow
@@ -78,6 +79,7 @@ data class UserSettings(
     val defaultShiftMinutes: Int = 450,
     val breakMinutes: Int = 0,
     val breakOverMinutes: Int = 8 * 60,
+    val cutoffDay: Int = PayPeriod.DEFAULT_CUTOFF_DAY,
 ) {
     val breakPolicy get() = BreakPolicy(breakMinutes, breakOverMinutes)
 }
@@ -90,6 +92,7 @@ class SettingsStore(private val context: Context) {
     private val shiftKey = intPreferencesKey("default_shift_minutes")
     private val breakKey = intPreferencesKey("break_minutes")
     private val breakOverKey = intPreferencesKey("break_over_minutes")
+    private val cutoffKey = intPreferencesKey("cutoff_day")
 
     val settings: Flow<UserSettings> = context.dataStore.data.map { prefs ->
         val defaults = UserSettings()
@@ -99,6 +102,8 @@ class SettingsStore(private val context: Context) {
             defaultShiftMinutes = prefs[shiftKey] ?: defaults.defaultShiftMinutes,
             breakMinutes = prefs[breakKey] ?: defaults.breakMinutes,
             breakOverMinutes = prefs[breakOverKey] ?: defaults.breakOverMinutes,
+            cutoffDay = (prefs[cutoffKey] ?: defaults.cutoffDay)
+                .coerceIn(PayPeriod.MIN_CUTOFF_DAY, PayPeriod.MAX_CUTOFF_DAY),
         )
     }
 
@@ -109,6 +114,7 @@ class SettingsStore(private val context: Context) {
             prefs[shiftKey] = value.defaultShiftMinutes
             prefs[breakKey] = value.breakMinutes
             prefs[breakOverKey] = value.breakOverMinutes
+            prefs[cutoffKey] = value.cutoffDay
         }
     }
 }

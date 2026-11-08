@@ -101,23 +101,24 @@ fun rememberNow(): LocalDateTime {
 private val PERIOD_ORIGIN = YearMonth.of(2020, 1)
 private const val PERIOD_PAGES = 80 * 12
 
-fun periodAt(page: Int): PayPeriod = PayPeriod(PERIOD_ORIGIN.plusMonths(page.toLong()))
+fun periodAt(page: Int, cutoffDay: Int): PayPeriod = PayPeriod(PERIOD_ORIGIN.plusMonths(page.toLong()), cutoffDay)
 
 /** Paginador de cortes que mantiene el corte elegido sincronizado entre pantallas. */
 @Composable
 fun rememberPeriodPager(period: PayPeriod, onSettled: (PayPeriod) -> Unit): PagerState {
     val pager = rememberPagerState(initialPage = ChronoUnit.MONTHS.between(PERIOD_ORIGIN, period.month).toInt()) { PERIOD_PAGES }
     val currentOnSettled by rememberUpdatedState(onSettled)
+    val currentCutoffDay by rememberUpdatedState(period.cutoffDay)
     LaunchedEffect(pager) {
-        snapshotFlow { pager.settledPage }.collect { currentOnSettled(periodAt(it)) }
+        snapshotFlow { pager.settledPage }.collect { currentOnSettled(periodAt(it, currentCutoffDay)) }
     }
     return pager
 }
 
 @Composable
-fun PeriodSelector(pager: PagerState) {
+fun PeriodSelector(pager: PagerState, cutoffDay: Int) {
     val scope = rememberCoroutineScope()
-    val period = periodAt(pager.currentPage)
+    val period = periodAt(pager.currentPage, cutoffDay)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = { scope.launch { pager.animateScrollToPage(pager.currentPage - 1, animationSpec = Motion.standard()) } }) {
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Corte anterior")

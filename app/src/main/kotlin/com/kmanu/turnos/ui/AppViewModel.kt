@@ -1,5 +1,9 @@
 package com.kmanu.turnos.ui
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
@@ -19,6 +23,7 @@ import com.kmanu.turnos.domain.ShiftValidation
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.YearMonth
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -65,16 +70,22 @@ class AppViewModel(
     private val repository: ShiftRepository,
     private val settingsStore: SettingsStore,
 ) : ViewModel() {
-    private val period = MutableStateFlow(PayPeriod.containing(LocalDate.now()))
+    /** Mes elegido en los paginadores; `null` sigue el corte en curso según el día de corte. */
+    private val selectedMonth = MutableStateFlow<YearMonth?>(null)
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val messages: SharedFlow<String> = _messages
 
-    val state: StateFlow<UiState?> = combine(repository.shifts, settingsStore.settings, period) { shifts, settings, period ->
-        UiState(shifts, settings, period)
+    /** La calculadora manual vive aquí para no perder lo escrito al cambiar de pestaña o de corte. */
+    var manualMode by mutableStateOf(false)
+    val manualDrafts = mutableStateMapOf<YearMonth, ManualDraft>()
+
+    val state: StateFlow<UiState?> = combine(repository.shifts, settingsStore.settings, selectedMonth) { shifts, settings, month ->
+        val cutoffDay = settings.cutoffDay
+        UiState(shifts, settings, PayPeriod(month ?: PayPeriod.containing(LocalDate.now(), cutoffDay).month, cutoffDay))
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun selectPeriod(value: PayPeriod) {
-        period.value = value
+        selectedMonth.value = value.month
     }
 
     fun checkIn(scheduledEnd: LocalDateTime, breakMinutes: Int) {
@@ -121,6 +132,8 @@ class AppViewModel(
     }
 
     fun saveSettings(settings: UserSettings) {
+        // Con otro día de corte, el corte en curso puede ser otro mes.
+        if (state.value?.settings?.cutoffDay != settings.cutoffDay) selectedMonth.value = null
         viewModelScope.launch {
             settingsStore.save(settings)
             _messages.emit("Ajustes guardados")
