@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -20,8 +19,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
 import com.kmanu.turnos.data.UserSettings
+import com.kmanu.turnos.ui.theme.Spacing
 import kotlin.math.roundToInt
 
 private fun Int.minutesAsHoursText(): String =
@@ -39,8 +38,8 @@ fun SettingsScreen(settings: UserSettings, onSave: (UserSettings) -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
 
     Column(
-        Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(Spacing.md),
+        verticalArrangement = Arrangement.spacedBy(Spacing.ms),
     ) {
         Text("Ajustes", style = MaterialTheme.typography.headlineMedium)
         NumberField("Salario mensual", salary, KeyboardType.Number) { salary = it.filter(Char::isDigit) }
@@ -57,7 +56,8 @@ fun SettingsScreen(settings: UserSettings, onSave: (UserSettings) -> Unit) {
         NumberField("Aplicar en turnos de más de (horas)", breakOverHours, KeyboardType.Decimal) { breakOverHours = it }
 
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Button(
+        PrimaryAction(
+            text = "Guardar",
             onClick = {
                 val parsedSalary = salary.toLongOrNull()
                 val parsedAllowance = allowance.toLongOrNull()
@@ -74,8 +74,7 @@ fun SettingsScreen(settings: UserSettings, onSave: (UserSettings) -> Unit) {
                     onSave(UserSettings(parsedSalary, parsedAllowance, parsedShift, parsedBreak, parsedBreakOver))
                 }
             },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Guardar") }
+        )
     }
 }
 

@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -26,23 +28,32 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import com.kmanu.turnos.domain.PayPeriod
+import com.kmanu.turnos.ui.theme.Motion
+import com.kmanu.turnos.ui.theme.Spacing
+import com.kmanu.turnos.ui.theme.tabular
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.YearMonth
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlin.math.abs
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val locale = Locale.forLanguageTag("es-CO")
 private val symbols = DecimalFormatSymbols(locale).apply {
@@ -55,9 +66,18 @@ private val shortDateFormat = DateTimeFormatter.ofPattern("d MMM", locale)
 private val monthFormat = DateTimeFormatter.ofPattern("MMMM yyyy", locale)
 
 fun money(value: Long): String = (if (value < 0) "-$" else "$") + DecimalFormat("#,##0", symbols).format(abs(value))
-fun hours(minutes: Long): String = DecimalFormat("0.##", symbols).format(minutes / 60.0) + " h"
+fun hours(minutes: Long): String {
+    val wholeHours = minutes / 60
+    val rest = minutes % 60
+    return when {
+        wholeHours == 0L -> "$rest min"
+        rest == 0L -> "$wholeHours h"
+        else -> "$wholeHours h $rest min"
+    }
+}
 fun LocalTime.label(): String = format(timeFormat)
 fun LocalDate.label(): String = format(dateFormat)
+fun LocalDate.shortLabel(): String = format(shortDateFormat)
 fun LocalDateTime.timeLabel(): String = toLocalTime().label()
 
 fun PayPeriod.title(): String = month.format(monthFormat).replaceFirstChar { it.uppercase(locale) }
@@ -77,10 +97,29 @@ fun rememberNow(): LocalDateTime {
     return now
 }
 
+/** Cada corte es una página del paginador: 80 años desde [PERIOD_ORIGIN]. */
+private val PERIOD_ORIGIN = YearMonth.of(2020, 1)
+private const val PERIOD_PAGES = 80 * 12
+
+fun periodAt(page: Int): PayPeriod = PayPeriod(PERIOD_ORIGIN.plusMonths(page.toLong()))
+
+/** Paginador de cortes que mantiene el corte elegido sincronizado entre pantallas. */
 @Composable
-fun PeriodSelector(period: PayPeriod, onPrevious: () -> Unit, onNext: () -> Unit) {
+fun rememberPeriodPager(period: PayPeriod, onSettled: (PayPeriod) -> Unit): PagerState {
+    val pager = rememberPagerState(initialPage = ChronoUnit.MONTHS.between(PERIOD_ORIGIN, period.month).toInt()) { PERIOD_PAGES }
+    val currentOnSettled by rememberUpdatedState(onSettled)
+    LaunchedEffect(pager) {
+        snapshotFlow { pager.settledPage }.collect { currentOnSettled(periodAt(it)) }
+    }
+    return pager
+}
+
+@Composable
+fun PeriodSelector(pager: PagerState) {
+    val scope = rememberCoroutineScope()
+    val period = periodAt(pager.currentPage)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onPrevious) {
+        IconButton(onClick = { scope.launch { pager.animateScrollToPage(pager.currentPage - 1, animationSpec = Motion.standard()) } }) {
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Corte anterior")
         }
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -91,17 +130,23 @@ fun PeriodSelector(period: PayPeriod, onPrevious: () -> Unit, onNext: () -> Unit
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        IconButton(onClick = onNext) {
+        IconButton(onClick = { scope.launch { pager.animateScrollToPage(pager.currentPage + 1, animationSpec = Motion.standard()) } }) {
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Corte siguiente")
         }
     }
 }
 
 @Composable
-fun AmountRow(label: String, value: String, detail: String? = null, emphasized: Boolean = false) {
+fun AmountRow(
+    label: String,
+    value: String,
+    detail: String? = null,
+    emphasized: Boolean = false,
+    detailColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Modifier.fillMaxWidth().padding(vertical = Spacing.xs),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -111,13 +156,12 @@ fun AmountRow(label: String, value: String, detail: String? = null, emphasized: 
                 fontWeight = if (emphasized) FontWeight.SemiBold else null,
             )
             if (detail != null) {
-                Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(detail, style = MaterialTheme.typography.bodySmall, color = detailColor)
             }
         }
         Text(
             value,
-            style = (if (emphasized) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyMedium)
-                .copy(fontFeatureSettings = "tnum"),
+            style = (if (emphasized) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyMedium).tabular(),
             fontWeight = if (emphasized) FontWeight.SemiBold else null,
         )
     }
@@ -161,7 +205,7 @@ fun DateTimeField(label: String, value: LocalDateTime, onChange: (LocalDateTime)
     var pickingTime by remember { mutableStateOf(false) }
     Column {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
             OutlinedButton(onClick = { pickingDate = true }, Modifier.weight(1f)) { Text(value.toLocalDate().label()) }
             OutlinedButton(onClick = { pickingTime = true }, Modifier.weight(1f)) { Text(value.timeLabel()) }
         }

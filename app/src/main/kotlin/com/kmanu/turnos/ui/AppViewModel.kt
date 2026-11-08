@@ -73,11 +73,8 @@ class AppViewModel(
         UiState(shifts, settings, period)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    fun previousPeriod() = period.update { it.previous() }
-    fun nextPeriod() = period.update { it.next() }
-
-    private fun <T> MutableStateFlow<T>.update(transform: (T) -> T) {
-        value = transform(value)
+    fun selectPeriod(value: PayPeriod) {
+        period.value = value
     }
 
     fun checkIn(scheduledEnd: LocalDateTime, breakMinutes: Int) {

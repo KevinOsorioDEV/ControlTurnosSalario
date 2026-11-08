@@ -27,12 +27,12 @@ data class Shift(
 enum class Concept(val label: String) {
     EXTRA_DAY("Hora extra diurna"),
     EXTRA_NIGHT("Hora extra nocturna"),
-    EXTRA_DAY_SUNDAY("Hora extra diurna DF"),
-    EXTRA_NIGHT_SUNDAY("Hora extra nocturna DF"),
+    EXTRA_DAY_SUNDAY("Hora extra diurna en domingo o festivo"),
+    EXTRA_NIGHT_SUNDAY("Hora extra nocturna en domingo o festivo"),
     NIGHT("Recargo nocturno ordinario"),
-    SUNDAY_DAY("Recargo diurno DF"),
-    SUNDAY_NIGHT("Recargo nocturno DF"),
-    SUNDAY_NO_REST("Hora trabajada DF sin compensatorio");
+    SUNDAY_DAY("Recargo diurno en domingo o festivo"),
+    SUNDAY_NIGHT("Recargo nocturno en domingo o festivo"),
+    SUNDAY_NO_REST("Hora trabajada en domingo o festivo sin compensatorio");
 
     /** Fracción de la hora ordinaria que paga este concepto. */
     fun factor(sundayRate: BigDecimal): BigDecimal = when (this) {
