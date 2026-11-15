@@ -29,6 +29,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import com.kmanu.turnos.data.UserSettings
 import com.kmanu.turnos.domain.Concept
+import com.kmanu.turnos.domain.Json
 import com.kmanu.turnos.domain.LaborRules
 import com.kmanu.turnos.domain.ManualInput
 import com.kmanu.turnos.domain.PayPeriod
@@ -37,6 +38,7 @@ import com.kmanu.turnos.ui.theme.Sizes
 import com.kmanu.turnos.ui.theme.Spacing
 import com.kmanu.turnos.ui.theme.tabular
 import java.math.BigDecimal
+import java.time.YearMonth
 
 /** Lo escrito para un corte. `null` significa que el campo sigue con su valor sugerido. */
 data class ManualDraft(
@@ -47,6 +49,41 @@ data class ManualDraft(
     val monthlyHours: String? = null,
     val hours: Map<Concept, String> = emptyMap(),
 )
+
+/** Borradores como JSON, para que sobrevivan al cerrar la app. Se omiten los vacíos. */
+fun encodeDrafts(drafts: Map<YearMonth, ManualDraft>): String = Json.write(
+    drafts.filterValues { it != ManualDraft() }.map { (month, draft) ->
+        mapOf(
+            "mes" to month.toString(),
+            "salario" to draft.salary,
+            "auxilio" to draft.allowance,
+            "dias" to draft.days,
+            "dominical" to draft.sundayPercent,
+            "divisor" to draft.monthlyHours,
+            "horas" to draft.hours.mapKeys { it.key.name },
+        )
+    },
+)
+
+/** Lo que no se pueda leer se descarta: es un borrador, no un dato que haya que conservar. */
+fun decodeDrafts(text: String): Map<YearMonth, ManualDraft> = runCatching {
+    (Json.parse(text) as List<*>).mapNotNull { entry ->
+        val map = entry as? Map<*, *> ?: return@mapNotNull null
+        val month = runCatching { YearMonth.parse(map["mes"] as String) }.getOrNull() ?: return@mapNotNull null
+        val hours = (map["horas"] as? Map<*, *>).orEmpty().mapNotNull { (key, value) ->
+            val concept = Concept.entries.firstOrNull { it.name == key } ?: return@mapNotNull null
+            (value as? String)?.let { concept to it }
+        }.toMap()
+        month to ManualDraft(
+            salary = map["salario"] as? String,
+            allowance = map["auxilio"] as? String,
+            days = map["dias"] as? String,
+            sundayPercent = map["dominical"] as? String,
+            monthlyHours = map["divisor"] as? String,
+            hours = hours,
+        )
+    }.toMap()
+}.getOrDefault(emptyMap())
 
 private const val FULL_MONTH_DAYS = 30
 private val HUNDRED = BigDecimal(100)
@@ -106,8 +143,11 @@ fun ManualLiquidation(
     var openGroup by rememberSaveable { mutableStateOf<String?>(HOUR_GROUPS.first().title) }
     var dataOpen by rememberSaveable { mutableStateOf(false) }
 
-    val salaryText = draft.salary ?: settings.monthlySalary.toString()
-    val allowanceText = draft.allowance ?: settings.monthlyAllowance.toString()
+    // Valores sugeridos: los vigentes el día de pago de este corte.
+    val periodSalary = settings.salaryHistory.at(period.payday)
+    val periodAllowance = settings.paySettings.allowanceAt(period.payday)
+    val salaryText = draft.salary ?: periodSalary.toString()
+    val allowanceText = draft.allowance ?: periodAllowance.toString()
     val daysText = draft.days ?: FULL_MONTH_DAYS.toString()
     val percentText = draft.sundayPercent ?: suggestedPercent
     val divisorText = draft.monthlyHours ?: rules.monthlyHours.toString()
@@ -120,8 +160,8 @@ fun ManualLiquidation(
     val anyDataInvalid = salary == null || allowance == null || days == null || percent == null || divisor == null
 
     val input = ManualInput(
-        monthlySalary = salary ?: settings.monthlySalary,
-        monthlyAllowance = allowance ?: settings.monthlyAllowance,
+        monthlySalary = salary ?: periodSalary,
+        monthlyAllowance = allowance ?: periodAllowance,
         daysWorked = days ?: FULL_MONTH_DAYS,
         monthlyHours = divisor ?: rules.monthlyHours,
         sundayRate = (percent ?: rules.sundayRate.multiply(HUNDRED)).divide(HUNDRED),
@@ -188,7 +228,7 @@ fun ManualLiquidation(
                 FilledField(
                     allowanceText,
                     { onDraftChange(draft.copy(allowance = it.keepDigits())) },
-                    "Auxilio de conectividad mensual",
+                    "Auxilio de transporte o conectividad",
                     isError = allowance == null,
                     prefix = "$",
                     transformation = ThousandsTransformation,

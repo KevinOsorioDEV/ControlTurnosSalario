@@ -340,6 +340,8 @@ fun TurnosSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Un
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         shape = RoundedCornerShape(topStart = Radius.hero, topEnd = Radius.hero),
         containerColor = TurnosTheme.colors.card,
+        // Sin esto la hoja hereda el color de la tarjeta desde la que se abrió.
+        contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         Column(
             Modifier.fillMaxWidth().navigationBarsPadding().padding(start = Spacing.md, end = Spacing.md, bottom = Spacing.md),

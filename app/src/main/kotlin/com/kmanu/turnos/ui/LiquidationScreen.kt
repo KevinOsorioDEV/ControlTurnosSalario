@@ -32,7 +32,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import com.kmanu.turnos.domain.LegalPay
 import com.kmanu.turnos.domain.Liquidation
+import com.kmanu.turnos.domain.PayPeriod
 import com.kmanu.turnos.ui.theme.Motion
 import com.kmanu.turnos.ui.theme.Radius
 import com.kmanu.turnos.ui.theme.Spacing
@@ -59,7 +61,7 @@ fun LiquidationScreen(state: UiState, viewModel: AppViewModel) {
                     settings = state.settings,
                     period = pagePeriod,
                     draft = viewModel.manualDrafts[month] ?: ManualDraft(),
-                    onDraftChange = { viewModel.manualDrafts[month] = it },
+                    onDraftChange = { viewModel.updateDraft(month, it) },
                     detailOpen = detailOpen,
                     onToggleDetail = { detailOpen = !detailOpen },
                 )
@@ -70,10 +72,27 @@ fun LiquidationScreen(state: UiState, viewModel: AppViewModel) {
                     verticalArrangement = Arrangement.spacedBy(Spacing.ms),
                 ) {
                     NetCard(result)
+                    if (state.settings.customAllowance == null) LegalValuesNotice(pagePeriod)
                     CalculationCard(result, open = detailOpen, onToggle = { detailOpen = !detailOpen })
                 }
             }
         }
+    }
+}
+
+/** Si el año del pago aún no tiene decreto en la app, el auxilio puede estar desactualizado. */
+@Composable
+private fun LegalValuesNotice(period: PayPeriod) {
+    val year = period.payday.year
+    if (LegalPay.isKnown(year) || year < LegalPay.lastKnownYear) return
+    TurnosCard {
+        Text("Valores de ley de $year pendientes", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "El auxilio usa el valor de ${LegalPay.lastKnownYear}. Si ya salió el decreto de $year, " +
+                "escribe el nuevo valor en Ajustes o actualiza la app.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -147,7 +166,7 @@ fun CalculationCard(
                         AmountRow("Salario del mes", money(result.salary))
                         AmountRow("Recargos y extras", money(result.noveltiesTotal))
                         AmountRow("Devengado", money(result.earned))
-                        AmountRow("Auxilio de conectividad", money(result.allowance))
+                        AmountRow("Auxilio de transporte o conectividad", money(result.allowance))
                         AmountRow("Salud y pensión (8%)", money(-result.healthAndPension))
                         HorizontalDivider(Modifier.padding(vertical = Spacing.sm))
                         AmountRow("Neto a recibir", money(result.net), emphasized = true)

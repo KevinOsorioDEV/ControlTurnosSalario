@@ -14,6 +14,12 @@ import java.time.temporal.ChronoUnit
  * @property breakMinutes descanso no pagado, que se descuenta del centro del tiempo programado.
  * @property compensatoryRest `false` si un domingo o festivo trabajado no tiene descanso
  * compensatorio: entonces, además del recargo, se paga la hora trabajada.
+ * @property scheduledStart entrada programada. Si existe, se paga según el turno programado y
+ * [start] y [end] quedan como registro de lo marcado. Los turnos anteriores a esta función no la
+ * tienen y se pagan tal como se marcaron.
+ * @property marginMinutes margen de puntualidad vigente cuando se marcó el turno.
+ * @property extrasAuthorized si las horas después del margen se pagan como extra.
+ * @property authorizedBy quién autorizó las horas extra, para la bitácora.
  */
 data class Shift(
     val id: String,
@@ -22,7 +28,15 @@ data class Shift(
     val scheduledEnd: LocalDateTime,
     val breakMinutes: Int = 0,
     val compensatoryRest: Boolean = true,
+    val scheduledStart: LocalDateTime? = null,
+    val marginMinutes: Int = 0,
+    val extrasAuthorized: Boolean = true,
+    val authorizedBy: String? = null,
+    val extraNote: String? = null,
 )
+
+/** Tramo del turno que se paga. */
+data class PaidInterval(val start: LocalDateTime, val end: LocalDateTime)
 
 enum class Concept(val label: String) {
     EXTRA_DAY("Hora extra diurna"),
@@ -47,10 +61,20 @@ enum class Concept(val label: String) {
     }
 }
 
+/**
+ * Datos de pago de la persona.
+ *
+ * @property customAllowance auxilio que paga la empresa; `null` sigue el valor de ley de cada año.
+ */
 data class PaySettings(
-    val monthlySalary: Long,
-    val monthlyAllowance: Long,
-)
+    val salary: SalaryHistory,
+    val customAllowance: Long? = null,
+) {
+    /** Salario y auxilio fijos, sin historial. */
+    constructor(monthlySalary: Long, monthlyAllowance: Long) : this(SalaryHistory.fixed(monthlySalary), monthlyAllowance)
+
+    fun allowanceAt(date: LocalDate): Long = customAllowance ?: LegalPay.allowanceFor(salary.at(date), date)
+}
 
 /**
  * Liquidación de un mes: salario del mes más las novedades desde el día siguiente al corte del
@@ -128,31 +152,52 @@ object PayrollCalculator {
     private val MINUTES_PER_HOUR = BigDecimal(60)
     private const val DAYS_PER_MONTH = 30
 
-    private data class Bucket(val concept: Concept, val rules: LaborRules)
+    private data class Bucket(val concept: Concept, val rules: LaborRules, val monthlySalary: Long)
 
     /** Desglose de un turno. [until] permite calcular un turno abierto hasta el momento actual. */
+    fun breakdown(
+        shift: Shift,
+        salary: SalaryHistory,
+        until: LocalDateTime? = null,
+        includeDate: (LocalDate) -> Boolean = { true },
+    ): ShiftBreakdown = accumulate(listOf(shift), salary, until, includeDate)
+
     fun breakdown(
         shift: Shift,
         monthlySalary: Long,
         until: LocalDateTime? = null,
         includeDate: (LocalDate) -> Boolean = { true },
-    ): ShiftBreakdown = accumulate(listOf(shift), monthlySalary, until, includeDate)
+    ): ShiftBreakdown = breakdown(shift, SalaryHistory.fixed(monthlySalary), until, includeDate)
 
+    /** Turnos cerrados que pueden tener horas en [period]; el resto ni se recorre. */
+    fun shiftsIn(shifts: List<Shift>, period: PayPeriod): List<Shift> {
+        // Un día de holgura: el tramo pagado puede empezar un poco antes de lo marcado.
+        val from = period.noveltiesFrom.minusDays(1)
+        val to = period.noveltiesTo.plusDays(1)
+        return shifts.filter { shift ->
+            val end = shift.end ?: return@filter false
+            shift.start.toLocalDate() <= to && end.toLocalDate() >= from
+        }
+    }
+
+    /** El salario del mes es el vigente el día de pago; cada hora, el vigente el día trabajado. */
     fun liquidate(shifts: List<Shift>, settings: PaySettings, period: PayPeriod): Liquidation {
-        val breakdown = accumulate(shifts.filter { it.end != null }, settings.monthlySalary, null, period::contains)
+        val breakdown = accumulate(shiftsIn(shifts, period), settings.salary, null, period::contains)
+        val salary = settings.salary.at(period.payday)
+        val allowance = settings.allowanceAt(period.payday)
         val noveltiesTotal = breakdown.total
-        val earned = settings.monthlySalary + noveltiesTotal
+        val earned = salary + noveltiesTotal
         val deduction = BigDecimal(earned).multiply(HEALTH_AND_PENSION).setScale(0, RoundingMode.HALF_UP).toLong()
         return Liquidation(
             period = period,
-            salary = settings.monthlySalary,
+            salary = salary,
             workedMinutes = breakdown.workedMinutes,
             lines = breakdown.lines,
             noveltiesTotal = noveltiesTotal,
             earned = earned,
-            allowance = settings.monthlyAllowance,
+            allowance = allowance,
             healthAndPension = deduction,
-            net = earned + settings.monthlyAllowance - deduction,
+            net = earned + allowance - deduction,
         )
     }
 
@@ -206,27 +251,47 @@ object PayrollCalculator {
         BigDecimal(monthlyValue).multiply(BigDecimal(days))
             .divide(BigDecimal(DAYS_PER_MONTH), 0, RoundingMode.HALF_UP).toLong()
 
+    /** Tramo que se paga de un turno, o `null` si sigue abierto y no se indicó [until]. */
+    fun paidInterval(shift: Shift, until: LocalDateTime? = null): PaidInterval? {
+        val realEnd = (shift.end ?: until ?: return null).truncatedTo(ChronoUnit.MINUTES)
+        val realStart = shift.start.truncatedTo(ChronoUnit.MINUTES)
+        val scheduledStart = shift.scheduledStart?.truncatedTo(ChronoUnit.MINUTES)
+            ?: return PaidInterval(realStart, realEnd)
+        val scheduledEnd = shift.scheduledEnd.truncatedTo(ChronoUnit.MINUTES)
+        val margin = shift.marginMinutes.toLong()
+
+        val paidStart = if (realStart <= scheduledStart.plusMinutes(margin)) scheduledStart else realStart
+        val paidEnd = when {
+            // En curso se muestra lo que va: la decisión sobre las extras se toma al salir.
+            shift.end == null -> realEnd
+            realEnd > scheduledEnd.plusMinutes(margin) -> if (shift.extrasAuthorized) realEnd else scheduledEnd
+            realEnd >= scheduledEnd.minusMinutes(margin) -> scheduledEnd
+            else -> realEnd
+        }
+        return PaidInterval(paidStart, maxOf(paidStart, paidEnd))
+    }
+
     private fun accumulate(
         shifts: List<Shift>,
-        monthlySalary: Long,
+        salary: SalaryHistory,
         until: LocalDateTime?,
         includeDate: (LocalDate) -> Boolean,
     ): ShiftBreakdown {
         val minutes = HashMap<Bucket, Long>()
         var worked = 0L
         for (shift in shifts) {
-            val end = shift.end ?: until ?: continue
-            val start = shift.start.truncatedTo(ChronoUnit.MINUTES)
-            val finish = end.truncatedTo(ChronoUnit.MINUTES)
+            val (start, finish) = paidInterval(shift, until) ?: continue
             val breakRange = unpaidBreak(shift, start, finish)
             var minute = start
             while (minute < finish) {
                 val isBreak = breakRange != null && minute >= breakRange.first && minute < breakRange.second
-                if (!isBreak && includeDate(minute.toLocalDate())) {
+                val date = minute.toLocalDate()
+                if (!isBreak && includeDate(date)) {
                     worked++
-                    val rules = LaborRules.at(minute.toLocalDate())
+                    val rules = LaborRules.at(date)
+                    val monthlySalary = salary.at(date)
                     conceptsFor(minute, shift, rules).forEach { concept ->
-                        minutes.merge(Bucket(concept, rules), 1L, Long::plus)
+                        minutes.merge(Bucket(concept, rules, monthlySalary), 1L, Long::plus)
                     }
                 }
                 minute = minute.plusMinutes(1)
@@ -236,7 +301,7 @@ object PayrollCalculator {
             .groupBy({ it.key.concept }) { it }
             .map { (concept, entries) ->
                 val amount = entries.fold(BigDecimal.ZERO) { sum, (bucket, count) ->
-                    sum + amountFor(bucket, count, monthlySalary)
+                    sum + amountFor(bucket, count)
                 }
                 ConceptLine(concept, entries.sumOf { it.value }, amount.setScale(0, RoundingMode.HALF_UP).toLong())
             }
@@ -274,8 +339,8 @@ object PayrollCalculator {
         }
     }
 
-    private fun amountFor(bucket: Bucket, minutes: Long, monthlySalary: Long): BigDecimal =
-        BigDecimal(monthlySalary)
+    private fun amountFor(bucket: Bucket, minutes: Long): BigDecimal =
+        BigDecimal(bucket.monthlySalary)
             .multiply(BigDecimal(minutes))
             .multiply(bucket.concept.factor(bucket.rules.sundayRate))
             .divide(BigDecimal(bucket.rules.monthlyHours).multiply(MINUTES_PER_HOUR), 10, RoundingMode.HALF_UP)

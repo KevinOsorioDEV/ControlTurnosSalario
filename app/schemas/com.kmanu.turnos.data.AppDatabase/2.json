@@ -1,0 +1,87 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "7e7afe263c25ac129242e11ad009bcc3",
+    "entities": [
+      {
+        "tableName": "shifts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `start` TEXT NOT NULL, `end` TEXT, `scheduled_end` TEXT NOT NULL, `break_minutes` INTEGER NOT NULL, `compensatory_rest` INTEGER NOT NULL, `scheduled_start` TEXT, `margin_minutes` INTEGER NOT NULL, `extras_authorized` INTEGER NOT NULL, `authorized_by` TEXT, `extra_note` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "start",
+            "columnName": "start",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "end",
+            "columnName": "end",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "scheduledEnd",
+            "columnName": "scheduled_end",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "breakMinutes",
+            "columnName": "break_minutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "compensatoryRest",
+            "columnName": "compensatory_rest",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduledStart",
+            "columnName": "scheduled_start",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "marginMinutes",
+            "columnName": "margin_minutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "extrasAuthorized",
+            "columnName": "extras_authorized",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "authorizedBy",
+            "columnName": "authorized_by",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "extraNote",
+            "columnName": "extra_note",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '7e7afe263c25ac129242e11ad009bcc3')"
+    ]
+  }
+}

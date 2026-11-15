@@ -24,6 +24,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -34,11 +35,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import com.kmanu.turnos.domain.Concept
+import com.kmanu.turnos.domain.ExcelReport
 import com.kmanu.turnos.domain.PayrollCalculator
+import com.kmanu.turnos.domain.SalaryHistory
 import com.kmanu.turnos.domain.Shift
 import com.kmanu.turnos.domain.ShiftBreakdown
 import com.kmanu.turnos.ui.theme.Motion
@@ -47,10 +53,13 @@ import com.kmanu.turnos.ui.theme.Spacing
 import com.kmanu.turnos.ui.theme.StatusStyle
 import com.kmanu.turnos.ui.theme.TurnosColors
 import com.kmanu.turnos.ui.theme.TurnosTheme
+import com.kmanu.turnos.ui.theme.tabular
+import java.io.File
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
 import java.util.UUID
+import kotlinx.coroutines.launch
 
 private data class Editing(val shift: Shift, val isNew: Boolean) {
     val transitionKey: String get() = if (isNew) NEW_SHIFT_KEY else shift.transitionKey
@@ -68,6 +77,15 @@ fun HistoryScreen(state: UiState, viewModel: AppViewModel, onEditorOpenChange: (
     val pager = rememberPeriodPager(state.period, viewModel::selectPeriod)
     // Al volver del editor cada corte conserva su posición en la lista.
     val listStates = remember { mutableMapOf<Int, LazyListState>() }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var askingName by remember { mutableStateOf(false) }
+    val export: (String) -> Unit = { name ->
+        val period = periodAt(pager.currentPage, state.settings.cutoffDay)
+        scope.launch {
+            viewModel.writeExcel(File(context.cacheDir, "exports"), period, name)?.let(context::shareExcel)
+        }
+    }
 
     LaunchedEffect(editing != null) { onEditorOpenChange(editing != null) }
 
@@ -82,7 +100,17 @@ fun HistoryScreen(state: UiState, viewModel: AppViewModel, onEditorOpenChange: (
                 Box(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize()) {
                         Column(Modifier.padding(start = Spacing.md, end = Spacing.md, top = Spacing.md)) {
-                            Text("Historial", style = MaterialTheme.typography.headlineMedium)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Historial", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+                                PillChip(
+                                    "Exportar a Excel",
+                                    selected = false,
+                                    icon = Icons.Rounded.Share,
+                                    onClick = {
+                                        if (state.settings.workerName.isBlank()) askingName = true else export(state.settings.workerName)
+                                    },
+                                )
+                            }
                             PeriodSelector(pager, state.settings.cutoffDay)
                         }
                         HorizontalPager(pager, Modifier.weight(1f)) { page ->
@@ -98,6 +126,9 @@ fun HistoryScreen(state: UiState, viewModel: AppViewModel, onEditorOpenChange: (
                                 ),
                                 verticalArrangement = Arrangement.spacedBy(Spacing.sm),
                             ) {
+                                if (pageState.periodShifts.any { it.end != null }) {
+                                    item(key = "resumen") { PeriodSummary(pageState) }
+                                }
                                 if (pageState.periodShifts.isEmpty()) {
                                     item {
                                         Text(
@@ -110,7 +141,7 @@ fun HistoryScreen(state: UiState, viewModel: AppViewModel, onEditorOpenChange: (
                                 items(pageState.periodShifts, key = { it.id }) { shift ->
                                     ShiftRow(
                                         shift,
-                                        state.settings.monthlySalary,
+                                        state.salary,
                                         Modifier.sharedBounds(
                                             rememberSharedContentState(shift.transitionKey),
                                             this@AnimatedContent,
@@ -153,8 +184,9 @@ fun HistoryScreen(state: UiState, viewModel: AppViewModel, onEditorOpenChange: (
                     original = current.shift,
                     isNew = current.isNew,
                     breakPolicy = state.settings.breakPolicy,
-                    salary = state.settings.monthlySalary,
+                    salary = state.salary,
                     frequentShifts = state.frequentShifts,
+                    knownAuthorizers = state.knownAuthorizers,
                     onDismiss = { editing = null },
                     onSave = viewModel::save,
                     onDelete = {
@@ -165,6 +197,63 @@ fun HistoryScreen(state: UiState, viewModel: AppViewModel, onEditorOpenChange: (
                 )
             }
         }
+    }
+
+    if (askingName) {
+        WorkerNameSheet(
+            onDismiss = { askingName = false },
+            onDone = { name ->
+                askingName = false
+                viewModel.saveWorkerName(name)
+                export(name)
+            },
+        )
+    }
+}
+
+/** Totales del corte, para no tener que ir a Liquidación a verlos. */
+@Composable
+private fun PeriodSummary(state: UiState) {
+    val liquidation = state.liquidation
+    val closed = state.periodShifts.count { it.end != null }
+    TurnosCard {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            SummaryValue(if (closed == 1) "Turno" else "Turnos", closed.toString())
+            SummaryValue("Horas", hours(liquidation.workedMinutes))
+            SummaryValue("Recargos y extras", money(liquidation.noveltiesTotal), alignEnd = true)
+        }
+    }
+}
+
+@Composable
+private fun SummaryValue(label: String, value: String, alignEnd: Boolean = false) {
+    Column(horizontalAlignment = if (alignEnd) Alignment.End else Alignment.Start) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.titleMedium.tabular())
+    }
+}
+
+/** Se pide una sola vez: el nombre encabeza el Excel que se exporta. */
+@Composable
+private fun WorkerNameSheet(onDismiss: () -> Unit, onDone: (String) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var showError by remember { mutableStateOf(false) }
+    TurnosSheet(onDismiss) {
+        Text("¿Qué nombre va en el Excel?", style = MaterialTheme.typography.titleLarge)
+        FilledField(
+            value = name,
+            onValueChange = {
+                name = it
+                showError = false
+            },
+            label = "Tu nombre",
+            isError = showError,
+            keyboard = KeyboardType.Text,
+        )
+        if (showError) {
+            Text("Escribe tu nombre.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+        PrimaryAction("Exportar", onClick = { if (name.isBlank()) showError = true else onDone(name.trim()) })
     }
 }
 
@@ -189,10 +278,15 @@ internal fun ShiftBreakdown.tags(colors: TurnosColors): List<Pair<String, Status
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ShiftRow(shift: Shift, salary: Long, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun ShiftRow(shift: Shift, salary: SalaryHistory, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val colors = TurnosTheme.colors
     val breakdown = shift.end?.let { PayrollCalculator.breakdown(shift, salary) }
-    val tags = breakdown?.tags(colors) ?: listOf("En curso" to colors.active)
+    val missingAuthorizer = breakdown != null && shift.authorizedBy.isNullOrBlank() &&
+        breakdown.lines.any { it.concept in EXTRA_CONCEPTS }
+    val tags = (breakdown?.tags(colors) ?: listOf("En curso" to colors.active)) +
+        if (missingAuthorizer) listOf(ExcelReport.MISSING_AUTHORIZER to colors.extra) else emptyList()
+    // Solo se muestra si difiere de lo marcado, para no repetir el mismo horario.
+    val paid = shift.end?.let { PayrollCalculator.paidInterval(shift) }?.takeIf { it.start != shift.start || it.end != shift.end }
     Surface(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
@@ -207,6 +301,13 @@ private fun ShiftRow(shift: Shift, salary: Long, modifier: Modifier = Modifier, 
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                paid?.let {
+                    Text(
+                        "Se paga ${it.start.timeLabel()} – ${it.end.timeLabel()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (tags.isNotEmpty()) {
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(Spacing.xs),

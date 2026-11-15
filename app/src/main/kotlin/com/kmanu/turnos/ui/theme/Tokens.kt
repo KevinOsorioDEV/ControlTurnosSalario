@@ -33,6 +33,8 @@ object Sizes {
     val gridCell = 44.dp
     val counterValue = 52.dp
     val focusBorder = 2.dp
+    val lockBadge = 88.dp
+    val lockIcon = 40.dp
 }
 
 /** Toda la app se mueve con las mismas duraciones y la misma curva. */

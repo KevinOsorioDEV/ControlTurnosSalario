@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Turnos" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- AppCompat: el diálogo de huella lo requiere en Android 8 y 9. -->
+    <style name="Theme.Turnos" parent="Theme.AppCompat.DayNight.NoActionBar" />
     <color name="ic_launcher_background">#0B6E4F</color>
 </resources>

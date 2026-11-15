@@ -1,5 +1,7 @@
 package com.kmanu.turnos.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -8,34 +10,45 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import com.kmanu.turnos.data.UserSettings
 import com.kmanu.turnos.domain.PayPeriod
+import com.kmanu.turnos.domain.SalaryHistory
 import com.kmanu.turnos.ui.theme.Radius
 import com.kmanu.turnos.ui.theme.Spacing
 import com.kmanu.turnos.ui.theme.TurnosTheme
+import java.time.LocalDate
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private fun Int.minutesAsHoursText(): String =
     if (this % 60 == 0) (this / 60).toString() else (this / 60.0).toString().replace('.', ',')
@@ -52,23 +65,39 @@ private class SettingItem(
     val help: String? = null,
     val isMoney: Boolean = false,
     val decimal: Boolean = false,
+    val isText: Boolean = false,
+    /** Al cambiarlo se pregunta desde cuándo aplica. */
+    val asksSince: Boolean = false,
     val shown: (UserSettings) -> String,
     val text: (UserSettings) -> String,
     val apply: (UserSettings, String) -> UserSettings?,
 )
 
+private const val MAX_MARGIN_MINUTES = 120
+
 private val PAY_ITEMS = listOf(
+    SettingItem(
+        label = "Tu nombre",
+        error = "Escribe tu nombre.",
+        help = "Aparece en el Excel que exportes.",
+        isText = true,
+        shown = { it.workerName.ifBlank { "Sin nombre" } },
+        text = { it.workerName },
+        apply = { s, t -> t.takeIf(String::isNotBlank)?.let { s.copy(workerName = it) } },
+    ),
     SettingItem(
         label = "Salario mensual",
         error = "Escribe un salario mayor que cero.",
         isMoney = true,
+        asksSince = true,
         shown = { money(it.monthlySalary) },
         text = { it.monthlySalary.toString() },
         apply = { s, t -> t.toLongOrNull()?.takeIf { it > 0 }?.let { s.copy(monthlySalary = it) } },
     ),
     SettingItem(
-        label = "Auxilio de conectividad",
+        label = "Auxilio de transporte o conectividad",
         error = "Escribe el valor del auxilio, o 0 si no tienes.",
+        help = "Viene con el valor de ley según tu salario. Cámbialo solo si tu empresa paga otro.",
         isMoney = true,
         shown = { money(it.monthlyAllowance) },
         text = { it.monthlyAllowance.toString() },
@@ -85,6 +114,14 @@ private val PAY_ITEMS = listOf(
 )
 
 private val SHIFT_ITEMS = listOf(
+    SettingItem(
+        label = "Margen de puntualidad (minutos)",
+        error = "Escribe los minutos, entre 0 y $MAX_MARGIN_MINUTES.",
+        help = "Si llegas o sales dentro de este margen, se paga tu horario programado. Solo aplica a los turnos que marques de ahora en adelante.",
+        shown = { if (it.marginMinutes == 0) "Sin margen" else "${it.marginMinutes} min" },
+        text = { it.marginMinutes.toString() },
+        apply = { s, t -> t.toIntOrNull()?.takeIf { it in 0..MAX_MARGIN_MINUTES }?.let { s.copy(marginMinutes = it) } },
+    ),
     SettingItem(
         label = "Duración habitual (horas)",
         error = "Escribe una duración menor de 24 horas.",
@@ -112,7 +149,12 @@ private val SHIFT_ITEMS = listOf(
 )
 
 @Composable
-fun SettingsScreen(settings: UserSettings, onSave: (UserSettings) -> Unit) {
+fun SettingsScreen(
+    settings: UserSettings,
+    viewModel: AppViewModel,
+    lockEnabled: Boolean,
+    onLockChange: (Boolean) -> Unit,
+) {
     var editing by remember { mutableStateOf<SettingItem?>(null) }
 
     Column(
@@ -122,24 +164,134 @@ fun SettingsScreen(settings: UserSettings, onSave: (UserSettings) -> Unit) {
         Text("Ajustes", style = MaterialTheme.typography.headlineMedium)
         SettingsGroup("Tu pago", PAY_ITEMS, settings) { editing = it }
         SettingsGroup("Tu turno", SHIFT_ITEMS, settings) { editing = it }
+        SecurityGroup(lockEnabled, onLockChange)
+        DataGroup(viewModel)
     }
 
     editing?.let { item ->
-        SettingSheet(item, settings, onDismiss = { editing = null }) {
-            onSave(it)
+        SettingSheet(item, settings, viewModel.salaryChangeStart(), onDismiss = { editing = null }) { updated, since ->
+            viewModel.saveSettings(updated, since)
             editing = null
         }
     }
 }
 
+/** Copia de seguridad en un archivo que la persona guarda donde quiera (Drive, correo, la memoria). */
 @Composable
-private fun SettingsGroup(title: String, items: List<SettingItem>, settings: UserSettings, onOpen: (SettingItem) -> Unit) {
+private fun DataGroup(viewModel: AppViewModel) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var pendingRestore by remember { mutableStateOf<String?>(null) }
+
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val ok = runCatching {
+                val text = viewModel.backupText()
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                }
+            }.isSuccess
+            viewModel.showMessage(if (ok) "Copia de seguridad guardada" else "No se pudo guardar la copia.")
+        }
+    }
+    val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val text = runCatching {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+                }
+            }.getOrNull()
+            if (text == null) viewModel.showMessage("No se pudo abrir el archivo.") else pendingRestore = text
+        }
+    }
+
+    GroupTitle("Tus datos")
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(Radius.card), color = TurnosTheme.colors.card) {
+        Column {
+            ActionRow("Guardar copia de seguridad", "Turnos, salarios y ajustes en un archivo. Guárdalo en Drive o envíatelo.") {
+                save.launch("Turnos-respaldo-${LocalDate.now()}.json")
+            }
+            HorizontalDivider(Modifier.padding(horizontal = Spacing.md), color = MaterialTheme.colorScheme.surfaceContainer)
+            ActionRow("Restaurar una copia", "Reemplaza los turnos y ajustes de este teléfono por los del archivo.") {
+                open.launch(arrayOf("application/json", "application/octet-stream", "text/plain"))
+            }
+        }
+    }
+
+    pendingRestore?.let { text ->
+        AlertDialog(
+            onDismissRequest = { pendingRestore = null },
+            title = { Text("¿Restaurar la copia?") },
+            text = { Text("Se borrarán los turnos y ajustes actuales de este teléfono y se reemplazarán por los de la copia.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingRestore = null
+                    scope.launch { viewModel.showMessage(viewModel.restore(text) ?: "Copia restaurada") }
+                }) { Text("Restaurar") }
+            },
+            dismissButton = { TextButton(onClick = { pendingRestore = null }) { Text("Cancelar") } },
+        )
+    }
+}
+
+@Composable
+private fun ActionRow(title: String, detail: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(start = Spacing.md, end = Spacing.sm, top = Spacing.md, bottom = Spacing.md),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun GroupTitle(title: String) {
     Text(
         title,
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(start = Spacing.xs, top = Spacing.sm),
     )
+}
+
+@Composable
+private fun SecurityGroup(enabled: Boolean, onChange: (Boolean) -> Unit) {
+    GroupTitle("Seguridad")
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(Radius.card), color = TurnosTheme.colors.card) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .toggleable(value = enabled, role = Role.Switch, onValueChange = onChange)
+                .padding(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Pedir huella o PIN", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Al abrir la app y cada vez que salgas de ella.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = enabled, onCheckedChange = null)
+        }
+    }
+}
+
+@Composable
+private fun SettingsGroup(title: String, items: List<SettingItem>, settings: UserSettings, onOpen: (SettingItem) -> Unit) {
+    GroupTitle(title)
     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(Radius.card), color = TurnosTheme.colors.card) {
         Column {
             items.forEachIndexed { index, item ->
@@ -166,9 +318,16 @@ private fun SettingsGroup(title: String, items: List<SettingItem>, settings: Use
 }
 
 @Composable
-private fun SettingSheet(item: SettingItem, settings: UserSettings, onDismiss: () -> Unit, onDone: (UserSettings) -> Unit) {
+private fun SettingSheet(
+    item: SettingItem,
+    settings: UserSettings,
+    changeStart: LocalDate,
+    onDismiss: () -> Unit,
+    onDone: (UserSettings, salarySince: LocalDate) -> Unit,
+) {
     var text by remember { mutableStateOf(item.text(settings)) }
     var showError by remember { mutableStateOf(false) }
+    var retroactive by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
 
@@ -180,22 +339,47 @@ private fun SettingSheet(item: SettingItem, settings: UserSettings, onDismiss: (
         FilledField(
             value = text,
             onValueChange = {
-                text = if (item.decimal) it.decimalInput() else it.digitsOnly()
+                text = when {
+                    item.isText -> it
+                    item.decimal -> it.decimalInput()
+                    else -> it.digitsOnly()
+                }
                 showError = false
             },
             label = item.label,
             modifier = Modifier.focusRequester(focus),
             isError = showError,
-            keyboard = if (item.decimal) KeyboardType.Decimal else KeyboardType.Number,
+            keyboard = when {
+                item.isText -> KeyboardType.Text
+                item.decimal -> KeyboardType.Decimal
+                else -> KeyboardType.Number
+            },
             prefix = if (item.isMoney) "$" else null,
             transformation = if (item.isMoney) ThousandsTransformation else VisualTransformation.None,
         )
         if (showError) {
             Text(item.error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
+        if (item.asksSince && text.trim() != item.text(settings)) {
+            Text("¿Desde cuándo?", style = MaterialTheme.typography.titleSmall)
+            PillTabs(
+                options = listOf("Desde ${changeStart.shortLabel()}", "Corregir todo"),
+                selected = if (retroactive) 1 else 0,
+                onSelect = { retroactive = it == 1 },
+            )
+            Text(
+                if (retroactive) {
+                    "Usa \"Corregir todo\" si el salario anterior estaba mal escrito: se recalculan todos los cortes."
+                } else {
+                    "Los cortes anteriores conservan el salario con que se calcularon."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         PrimaryAction("Listo", onClick = {
             val updated = item.apply(settings, text.trim())
-            if (updated == null) showError = true else onDone(updated)
+            if (updated == null) showError = true else onDone(updated, if (retroactive) SalaryHistory.SINCE_ALWAYS else changeStart)
         })
     }
 }

@@ -38,7 +38,9 @@ import androidx.compose.ui.text.style.TextAlign
 import com.kmanu.turnos.domain.BreakPolicy
 import com.kmanu.turnos.domain.ColombiaHolidays
 import com.kmanu.turnos.domain.PayrollCalculator
+import com.kmanu.turnos.domain.SalaryHistory
 import com.kmanu.turnos.domain.Shift
+import com.kmanu.turnos.domain.ShiftPlanner
 import com.kmanu.turnos.ui.theme.Radius
 import com.kmanu.turnos.ui.theme.Sizes
 import com.kmanu.turnos.ui.theme.Spacing
@@ -50,7 +52,7 @@ import java.time.LocalTime
 
 private const val MINUTES_STEP = 15
 
-private enum class TimeTarget { START, END }
+private enum class TimeTarget { START, END, PLANNED_START, PLANNED_END }
 
 /**
  * Registrar o corregir un turno: un día y dos horas. La fecha de salida no se pide: si la hora
@@ -62,8 +64,9 @@ fun ShiftEditor(
     original: Shift,
     isNew: Boolean,
     breakPolicy: BreakPolicy,
-    salary: Long,
+    salary: SalaryHistory,
     frequentShifts: List<Pair<LocalTime, LocalTime>>,
+    knownAuthorizers: List<String>,
     onDismiss: () -> Unit,
     onSave: (Shift) -> String?,
     onDelete: () -> Unit,
@@ -71,7 +74,9 @@ fun ShiftEditor(
     modifier: Modifier = Modifier,
 ) {
     val isOpenShift = original.end == null
-    val initialExtra = original.end?.let { Duration.between(original.scheduledEnd, it).toMinutes().toInt().coerceAtLeast(0) } ?: 0
+    // Un turno programado se paga por su horario; uno registrado a mano, por lo que se escribe.
+    val isPlanned = original.scheduledStart != null
+    val initialExtra = if (isPlanned) 0 else original.end?.let { Duration.between(original.scheduledEnd, it).toMinutes().toInt().coerceAtLeast(0) } ?: 0
 
     var day by remember { mutableStateOf(original.start.toLocalDate()) }
     var startTime by remember { mutableStateOf(original.start.toLocalTime()) }
@@ -79,7 +84,19 @@ fun ShiftEditor(
     var extraMinutes by remember { mutableIntStateOf(initialExtra) }
     var breakOverride by remember { mutableStateOf(if (isNew) null else original.breakMinutes) }
     var compensatoryRest by remember { mutableStateOf(original.compensatoryRest) }
-    var optionsOpen by remember { mutableStateOf(!isNew && (original.breakMinutes > 0 || initialExtra > 0 || !original.compensatoryRest)) }
+    var plannedStart by remember { mutableStateOf(original.scheduledStart?.toLocalTime() ?: LocalTime.MIDNIGHT) }
+    var plannedEnd by remember { mutableStateOf(original.scheduledEnd.toLocalTime()) }
+    var extrasAuthorized by remember { mutableStateOf(original.extrasAuthorized) }
+    var authorizedBy by remember { mutableStateOf(original.authorizedBy.orEmpty()) }
+    var extraNote by remember { mutableStateOf(original.extraNote.orEmpty()) }
+    var optionsOpen by remember {
+        mutableStateOf(
+            !isNew && (
+                original.breakMinutes > 0 || initialExtra > 0 || !original.compensatoryRest ||
+                    original.end?.let { ShiftPlanner.needsExtraConfirmation(original, it) } == true
+                ),
+        )
+    }
     var picking by remember { mutableStateOf<TimeTarget?>(null) }
     var pickingDate by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -91,17 +108,36 @@ fun ShiftEditor(
     val duration = Duration.between(startAt, endAt).toMinutes().toInt()
     val extra = extraMinutes.coerceIn(0, duration - 1)
     val breakMinutes = breakOverride ?: breakPolicy.minutesFor((duration - extra).toLong())
-    val draft = if (isOpenShift) {
-        original.copy(start = startAt, scheduledEnd = endAt, breakMinutes = breakMinutes, compensatoryRest = compensatoryRest)
-    } else {
-        original.copy(
+    val authorizer = authorizedBy.trim().takeIf(String::isNotEmpty)
+    val note = extraNote.trim().takeIf(String::isNotEmpty)
+    val draft = when {
+        isPlanned -> {
+            val (scheduledStart, scheduledEnd) = ShiftPlanner.planFor(startAt, plannedStart, plannedEnd)
+            original.copy(
+                start = startAt,
+                end = if (isOpenShift) null else endAt,
+                scheduledStart = scheduledStart,
+                scheduledEnd = scheduledEnd,
+                breakMinutes = breakMinutes,
+                compensatoryRest = compensatoryRest,
+                extrasAuthorized = extrasAuthorized,
+                authorizedBy = authorizer,
+                extraNote = note,
+            )
+        }
+        isOpenShift -> original.copy(start = startAt, scheduledEnd = endAt, breakMinutes = breakMinutes, compensatoryRest = compensatoryRest)
+        else -> original.copy(
             start = startAt,
             end = endAt,
             scheduledEnd = endAt.minusMinutes(extra.toLong()),
             breakMinutes = breakMinutes,
             compensatoryRest = compensatoryRest,
+            authorizedBy = if (extra > 0) authorizer else null,
+            extraNote = if (extra > 0) note else null,
         )
     }
+    val needsAuthorization = isPlanned && !isOpenShift && ShiftPlanner.needsExtraConfirmation(draft, endAt)
+    val showAuthorizationFields = if (isPlanned) needsAuthorization && extrasAuthorized else !isOpenShift && extra > 0
     val touchesSundayOrHoliday = generateSequence(day) { it.plusDays(1) }
         .takeWhile { it <= endAt.toLocalDate() }
         .any(ColombiaHolidays::isSundayOrHoliday)
@@ -147,16 +183,42 @@ fun ShiftEditor(
                     }
                 }
 
+                if (isPlanned) {
+                    TurnosCard {
+                        Text(
+                            "Turno programado (lo que se paga)",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = muted,
+                            modifier = Modifier.padding(bottom = Spacing.sm),
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                            TimeTile("Entrada", plannedStart, null, Modifier.weight(1f)) { picking = TimeTarget.PLANNED_START }
+                            Icon(Icons.AutoMirrored.Rounded.ArrowForward, contentDescription = null, tint = muted)
+                            TimeTile("Salida", plannedEnd, null, Modifier.weight(1f)) { picking = TimeTarget.PLANNED_END }
+                        }
+                    }
+                }
+
                 TurnosCard {
+                    if (isPlanned) {
+                        Text(
+                            "Lo que marcaste",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = muted,
+                            modifier = Modifier.padding(bottom = Spacing.sm),
+                        )
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                         TimeTile("Entré", startTime, null, Modifier.weight(1f)) { picking = TimeTarget.START }
-                        Icon(Icons.AutoMirrored.Rounded.ArrowForward, contentDescription = null, tint = muted)
-                        TimeTile(
-                            if (isOpenShift) "Salgo a las" else "Salí",
-                            endTime,
-                            if (endsNextDay) "día siguiente" else null,
-                            Modifier.weight(1f),
-                        ) { picking = TimeTarget.END }
+                        if (!(isPlanned && isOpenShift)) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowForward, contentDescription = null, tint = muted)
+                            TimeTile(
+                                if (isOpenShift) "Salgo a las" else "Salí",
+                                endTime,
+                                if (endsNextDay) "día siguiente" else null,
+                                Modifier.weight(1f),
+                            ) { picking = TimeTarget.END }
+                        }
                     }
                     if (!isOpenShift) {
                         val breakdown = PayrollCalculator.breakdown(draft, salary)
@@ -194,7 +256,7 @@ fun ShiftEditor(
                             onChange = { breakOverride = it.coerceAtLeast(0) },
                         )
                     }
-                    if (!isOpenShift) {
+                    if (!isOpenShift && !isPlanned) {
                         OptionRow("Te quedaste más tiempo", "Cuenta como hora extra") {
                             MinutesStepper(
                                 value = extra,
@@ -203,6 +265,14 @@ fun ShiftEditor(
                                 onChange = { extraMinutes = it.coerceIn(0, duration - 1) },
                             )
                         }
+                    }
+                    if (needsAuthorization) {
+                        OptionRow("Horas extra autorizadas", "Si no, se paga hasta tu salida programada.") {
+                            Switch(checked = extrasAuthorized, onCheckedChange = { extrasAuthorized = it })
+                        }
+                    }
+                    if (showAuthorizationFields) {
+                        AuthorizationFields(authorizedBy, { authorizedBy = it }, extraNote, { extraNote = it }, knownAuthorizers)
                     }
                     if (touchesSundayOrHoliday) {
                         OptionRow("Me dan un día de descanso por este turno", "Si no te lo dan, también se paga la hora trabajada.") {
@@ -239,11 +309,26 @@ fun ShiftEditor(
 
     picking?.let { target ->
         TimeGridSheet(
-            title = if (target == TimeTarget.START) "¿A qué hora entraste?" else if (isOpenShift) "¿A qué hora sales?" else "¿A qué hora saliste?",
-            initial = if (target == TimeTarget.START) startTime else endTime,
+            title = when (target) {
+                TimeTarget.START -> "¿A qué hora entraste?"
+                TimeTarget.END -> if (isOpenShift) "¿A qué hora sales?" else "¿A qué hora saliste?"
+                TimeTarget.PLANNED_START -> "Entrada programada"
+                TimeTarget.PLANNED_END -> "Salida programada"
+            },
+            initial = when (target) {
+                TimeTarget.START -> startTime
+                TimeTarget.END -> endTime
+                TimeTarget.PLANNED_START -> plannedStart
+                TimeTarget.PLANNED_END -> plannedEnd
+            },
             onDismiss = { picking = null },
             onConfirm = {
-                if (target == TimeTarget.START) startTime = it else endTime = it
+                when (target) {
+                    TimeTarget.START -> startTime = it
+                    TimeTarget.END -> endTime = it
+                    TimeTarget.PLANNED_START -> plannedStart = it
+                    TimeTarget.PLANNED_END -> plannedEnd = it
+                }
                 error = null
                 picking = null
             },
@@ -298,7 +383,7 @@ private fun DayChips(day: LocalDate, onSelect: (LocalDate) -> Unit, onPickOther:
 }
 
 @Composable
-private fun TimeTile(label: String, time: LocalTime, note: String?, modifier: Modifier, onClick: () -> Unit) {
+internal fun TimeTile(label: String, time: LocalTime, note: String?, modifier: Modifier, onClick: () -> Unit) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Surface(
         onClick = onClick,

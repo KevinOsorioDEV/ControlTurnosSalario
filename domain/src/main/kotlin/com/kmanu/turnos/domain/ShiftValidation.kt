@@ -30,6 +30,20 @@ object ShiftValidation {
         }
     }
 
+    /** Error que impide marcar la entrada ahora, o `null` si se puede. */
+    fun validateCheckIn(scheduledEnd: LocalDateTime, others: List<Shift>, now: LocalDateTime): String? = when {
+        others.any { it.end == null } -> "Ya tienes un turno abierto."
+        !scheduledEnd.isAfter(now) -> "La salida programada debe ser posterior a la entrada."
+        others.any { it.start < scheduledEnd && (it.end ?: now) > now } -> "Se cruza con otro turno registrado."
+        else -> null
+    }
+
+    /** Error que impide cerrar [open] con salida en [exit], o `null` si se puede. */
+    fun validateCheckOut(open: Shift, exit: LocalDateTime, others: List<Shift>, now: LocalDateTime): String? = when {
+        exit.isAfter(now) -> "La salida no puede ser una hora que aún no llega."
+        else -> validate(open.copy(end = exit), others, now)
+    }
+
     private fun overlaps(shift: Shift, end: LocalDateTime, other: Shift, now: LocalDateTime): Boolean =
         shift.start < (other.end ?: now) && other.start < end
 }
