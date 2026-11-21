@@ -52,7 +52,7 @@ class SalaryHistoryTest {
         val liquidation = PayrollCalculator.liquidate(emptyList(), settings, PayPeriod(YearMonth.of(2026, 11)))
         assertThat(liquidation.allowance).isEqualTo(249_095)
 
-        val custom = PaySettings(SalaryHistory.fixed(1_750_905), customAllowance = 100_000)
+        val custom = PaySettings(SalaryHistory.fixed(1_750_905), monthlyAllowance = 100_000)
         assertThat(PayrollCalculator.liquidate(emptyList(), custom, PayPeriod(YearMonth.of(2026, 11))).allowance).isEqualTo(100_000)
     }
 
@@ -62,5 +62,40 @@ class SalaryHistoryTest {
         val near = Shift("cerca", at("2026-10-15T22:00"), at("2026-10-16T06:00"), at("2026-10-16T06:00"))
         val open = Shift("abierto", at("2026-11-10T08:00"), null, at("2026-11-10T16:00"))
         assertThat(PayrollCalculator.shiftsIn(listOf(old, near, open), PayPeriod(YearMonth.of(2026, 11)))).containsExactly(near)
+    }
+
+    @Test
+    fun `el salario minimo sube solo con el decreto de cada año`() {
+        val minimum = SalaryHistory(listOf(SalaryChange.minimumWage(SalaryHistory.SINCE_ALWAYS)))
+        assertThat(minimum.at(LocalDate.of(2025, 6, 1))).isEqualTo(1_423_500)
+        assertThat(minimum.at(LocalDate.of(2026, 6, 1))).isEqualTo(1_750_905)
+    }
+
+    @Test
+    fun `corte que cruza el año con el minimo usa cada valor en su fecha`() {
+        // Corte del 16 dic 2025 al 15 ene 2026, pagado en enero de 2026.
+        val minimum = SalaryHistory(listOf(SalaryChange.minimumWage(SalaryHistory.SINCE_ALWAYS)))
+        val december = Shift("dic", at("2025-12-21T08:00"), at("2025-12-21T10:00"), at("2025-12-21T10:00"))
+        val january = Shift("ene", at("2026-01-11T08:00"), at("2026-01-11T10:00"), at("2026-01-11T10:00"))
+        val period = PayPeriod(YearMonth.of(2026, 1))
+
+        val both = PayrollCalculator.liquidate(listOf(december, january), PaySettings(minimum), period)
+        val onlyDecember = PayrollCalculator.liquidate(listOf(december), PaySettings(SalaryHistory.fixed(1_423_500), 0), period)
+        val onlyJanuary = PayrollCalculator.liquidate(listOf(january), PaySettings(SalaryHistory.fixed(1_750_905), 0), period)
+
+        assertThat(both.noveltiesTotal).isEqualTo(onlyDecember.noveltiesTotal + onlyJanuary.noveltiesTotal)
+        assertThat(both.salary).isEqualTo(1_750_905)
+        assertThat(both.allowance).isEqualTo(249_095)
+    }
+
+    @Test
+    fun `se puede pasar de monto fijo al minimo y quitar cambios`() {
+        val mixed = history.withChange(SalaryChange.minimumWage(LocalDate.of(2027, 6, 1)))
+        assertThat(mixed.at(LocalDate.of(2027, 7, 1))).isEqualTo(1_750_905)
+        assertThat(SalaryHistory.decode(mixed.encode())).isEqualTo(mixed)
+
+        val removed = mixed.without(january)
+        assertThat(removed?.changes?.map { it.from }).containsExactly(SalaryHistory.SINCE_ALWAYS, LocalDate.of(2027, 6, 1)).inOrder()
+        assertThat(SalaryHistory.fixed(1).without(SalaryHistory.SINCE_ALWAYS)).isNull()
     }
 }

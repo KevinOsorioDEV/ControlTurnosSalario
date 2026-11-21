@@ -1,6 +1,7 @@
 package com.kmanu.turnos.data
 
 import android.content.Context
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -19,9 +20,9 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.kmanu.turnos.domain.AllowanceHistory
 import com.kmanu.turnos.domain.BackupData
 import com.kmanu.turnos.domain.BreakPolicy
-import com.kmanu.turnos.domain.LegalPay
 import com.kmanu.turnos.domain.PayPeriod
 import com.kmanu.turnos.domain.PaySettings
 import com.kmanu.turnos.domain.SalaryHistory
@@ -126,23 +127,24 @@ class ShiftRepository(private val dao: ShiftDao) {
 
 /**
  * @property monthlySalary salario vigente hoy; [salaryHistory] guarda los anteriores.
- * @property monthlyAllowance auxilio vigente hoy, de ley o personalizado.
- * @property customAllowance auxilio que paga la empresa; `null` sigue la ley.
+ * @property monthlyAllowance auxilio vigente hoy, de ley o fijo; [allowanceHistory] guarda los anteriores.
  */
 data class UserSettings(
     val monthlySalary: Long = 0,
     val monthlyAllowance: Long = 0,
     val salaryHistory: SalaryHistory = SalaryHistory.fixed(monthlySalary),
-    val customAllowance: Long? = null,
+    val allowanceHistory: AllowanceHistory = AllowanceHistory.LEGAL,
     val defaultShiftMinutes: Int = 450,
     val breakMinutes: Int = 0,
     val breakOverMinutes: Int = 8 * 60,
     val cutoffDay: Int = PayPeriod.DEFAULT_CUTOFF_DAY,
     val marginMinutes: Int = 15,
+    /** Minutos antes de la salida programada para avisar; 0 lo desactiva. */
+    val exitNoticeMinutes: Int = 0,
     val workerName: String = "",
 ) {
     val breakPolicy get() = BreakPolicy(breakMinutes, breakOverMinutes)
-    val paySettings get() = PaySettings(salaryHistory, customAllowance)
+    val paySettings get() = PaySettings(salaryHistory, allowanceHistory)
 }
 
 /** Lo que decide qué ve la persona al abrir la app. */
@@ -159,12 +161,14 @@ class SettingsStore(private val context: Context) {
     private val cutoffKey = intPreferencesKey("cutoff_day")
     private val lockKey = booleanPreferencesKey("lock_enabled")
     private val marginKey = intPreferencesKey("margin_minutes")
+    private val exitNoticeKey = intPreferencesKey("exit_notice_minutes")
     private val nameKey = stringPreferencesKey("worker_name")
     private val salaryHistoryKey = stringPreferencesKey("salary_history")
+    private val allowanceHistoryKey = stringPreferencesKey("allowance_history")
     private val manualDraftsKey = stringPreferencesKey("manual_drafts")
 
     /** Ajustes que van en la copia de seguridad. El bloqueo no: depende de cada teléfono. */
-    private val backupIntKeys = listOf(shiftKey, breakKey, breakOverKey, cutoffKey, marginKey)
+    private val backupIntKeys = listOf(shiftKey, breakKey, breakOverKey, cutoffKey, marginKey, exitNoticeKey)
 
     val access: Flow<AppAccess> = context.dataStore.data.map { prefs ->
         AppAccess(configured = prefs[salaryKey] != null, lockEnabled = prefs[lockKey] ?: false)
@@ -177,53 +181,69 @@ class SettingsStore(private val context: Context) {
         val history = prefs[salaryHistoryKey]?.let(SalaryHistory::decode)
             ?: SalaryHistory.fixed(prefs[salaryKey] ?: defaults.monthlySalary)
         val salary = history.at(today)
+        val allowance = allowanceHistory(prefs)
         UserSettings(
             monthlySalary = salary,
-            // Sin valor personalizado, el auxilio sigue lo que diga la ley.
-            monthlyAllowance = prefs[allowanceKey] ?: LegalPay.allowanceFor(salary, today),
+            monthlyAllowance = allowance.at(today, salary),
             salaryHistory = history,
-            customAllowance = prefs[allowanceKey],
+            allowanceHistory = allowance,
             defaultShiftMinutes = prefs[shiftKey] ?: defaults.defaultShiftMinutes,
             breakMinutes = prefs[breakKey] ?: defaults.breakMinutes,
             breakOverMinutes = prefs[breakOverKey] ?: defaults.breakOverMinutes,
             cutoffDay = (prefs[cutoffKey] ?: defaults.cutoffDay)
                 .coerceIn(PayPeriod.MIN_CUTOFF_DAY, PayPeriod.MAX_CUTOFF_DAY),
             marginMinutes = prefs[marginKey] ?: defaults.marginMinutes,
+            exitNoticeMinutes = prefs[exitNoticeKey] ?: defaults.exitNoticeMinutes,
             workerName = prefs[nameKey] ?: defaults.workerName,
         )
     }
 
     /**
-     * Guarda los ajustes. Si cambió el salario, el nuevo aplica desde [salarySince]; los cortes
-     * anteriores conservan el que tenían. [SalaryHistory.SINCE_ALWAYS] lo corrige en todos.
+     * Historial del auxilio. Las versiones anteriores guardaban un solo monto personalizado, sin
+     * fecha: se conserva aplicándolo a todas las fechas, como se venía calculando.
      */
-    suspend fun save(value: UserSettings, salarySince: LocalDate) {
+    private fun allowanceHistory(prefs: Preferences): AllowanceHistory =
+        prefs[allowanceHistoryKey]?.let(AllowanceHistory::decode)
+            ?: prefs[allowanceKey]?.let(AllowanceHistory::fixed)
+            ?: AllowanceHistory.LEGAL
+
+    /** Guarda los ajustes. El salario y el auxilio se cambian aparte, con su historial. */
+    suspend fun save(value: UserSettings) {
         context.dataStore.edit { prefs ->
-            if (value.monthlySalary != value.salaryHistory.at(LocalDate.now())) {
-                prefs[salaryHistoryKey] = value.salaryHistory.withChange(salarySince, value.monthlySalary).encode()
-            }
-            val customAllowance = LegalPay.customAllowanceToStore(
-                allowance = value.monthlyAllowance,
-                salary = value.monthlySalary,
-                previousCustom = prefs[allowanceKey],
-                previousSalary = prefs[salaryKey] ?: 0,
-                date = LocalDate.now(),
-            )
-            if (customAllowance == null) prefs.remove(allowanceKey) else prefs[allowanceKey] = customAllowance
             prefs[salaryKey] = value.monthlySalary
             prefs[shiftKey] = value.defaultShiftMinutes
             prefs[breakKey] = value.breakMinutes
             prefs[breakOverKey] = value.breakOverMinutes
             prefs[cutoffKey] = value.cutoffDay
             prefs[marginKey] = value.marginMinutes
+            prefs[exitNoticeKey] = value.exitNoticeMinutes
             prefs[nameKey] = value.workerName
         }
     }
 
-    suspend fun completeSetup(salary: Long, cutoffDay: Int) {
+    /**
+     * Reemplaza el historial de salarios. El auxilio de ley se recalcula solo; uno personalizado
+     * se conserva.
+     */
+    suspend fun saveSalaryHistory(history: SalaryHistory) {
         context.dataStore.edit {
-            it[salaryKey] = salary
-            it[salaryHistoryKey] = SalaryHistory.fixed(salary).encode()
+            it[salaryHistoryKey] = history.encode()
+            it[salaryKey] = history.at(LocalDate.now())
+        }
+    }
+
+    /** Reemplaza el historial del auxilio; el monto suelto de versiones anteriores deja de usarse. */
+    suspend fun saveAllowanceHistory(history: AllowanceHistory) {
+        context.dataStore.edit {
+            it[allowanceHistoryKey] = history.encode()
+            it.remove(allowanceKey)
+        }
+    }
+
+    suspend fun completeSetup(salary: SalaryHistory, cutoffDay: Int) {
+        context.dataStore.edit {
+            it[salaryKey] = salary.at(LocalDate.now())
+            it[salaryHistoryKey] = salary.encode()
             it[cutoffKey] = cutoffDay
         }
     }
@@ -238,7 +258,8 @@ class SettingsStore(private val context: Context) {
         val prefs = context.dataStore.data.first()
         val settings = buildMap {
             backupIntKeys.forEach { key -> prefs[key]?.let { put(key.name, it.toString()) } }
-            prefs[allowanceKey]?.let { put(allowanceKey.name, it.toString()) }
+            // El historial completo del auxilio viaja como texto entre los ajustes.
+            put(allowanceHistoryKey.name, allowanceHistory(prefs).encode())
             prefs[nameKey]?.let { put(nameKey.name, it) }
         }
         return BackupData(shifts, this.settings.first().salaryHistory, settings)
@@ -248,7 +269,12 @@ class SettingsStore(private val context: Context) {
     suspend fun restore(data: BackupData) {
         context.dataStore.edit { prefs ->
             backupIntKeys.forEach { key -> data.settings[key.name]?.toIntOrNull()?.let { prefs[key] = it } ?: prefs.remove(key) }
-            data.settings[allowanceKey.name]?.toLongOrNull()?.let { prefs[allowanceKey] = it } ?: prefs.remove(allowanceKey)
+            // Copias nuevas traen el historial; las anteriores, un monto sin fecha (o nada: auxilio de ley).
+            val allowance = data.settings[allowanceHistoryKey.name]?.let(AllowanceHistory::decode)
+                ?: data.settings[allowanceKey.name]?.toLongOrNull()?.let(AllowanceHistory::fixed)
+                ?: AllowanceHistory.LEGAL
+            prefs[allowanceHistoryKey] = allowance.encode()
+            prefs.remove(allowanceKey)
             data.settings[nameKey.name]?.let { prefs[nameKey] = it } ?: prefs.remove(nameKey)
             prefs[salaryHistoryKey] = data.salary.encode()
             prefs[salaryKey] = data.salary.at(LocalDate.now())

@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import com.kmanu.turnos.domain.PayPeriod
 import com.kmanu.turnos.ui.theme.Motion
 import com.kmanu.turnos.ui.theme.Spacing
@@ -60,7 +61,7 @@ private val timeFormat = DateTimeFormatter.ofPattern("h:mm a", Locale.US)
 private val dateFormat = DateTimeFormatter.ofPattern("EEE d MMM", locale)
 private val shortDateFormat = DateTimeFormatter.ofPattern("d MMM", locale)
 private val dayFormat = DateTimeFormatter.ofPattern("EEE d", locale)
-private val monthFormat = DateTimeFormatter.ofPattern("MMMM yyyy", locale)
+private val longDateFormat = DateTimeFormatter.ofPattern("d MMM yyyy", locale)
 
 fun money(value: Long): String = (if (value < 0) "-$" else "$") + DecimalFormat("#,##0", symbols).format(abs(value))
 fun hours(minutes: Long): String {
@@ -75,12 +76,16 @@ fun hours(minutes: Long): String {
 fun LocalTime.label(): String = format(timeFormat)
 fun LocalDate.label(): String = format(dateFormat)
 fun LocalDate.shortLabel(): String = format(shortDateFormat)
+fun LocalDate.longLabel(): String = format(longDateFormat)
 fun LocalDate.dayLabel(): String = format(dayFormat).replaceFirstChar { it.uppercase(locale) }
 fun LocalDateTime.timeLabel(): String = toLocalTime().label()
 
-fun PayPeriod.title(): String = month.format(monthFormat).replaceFirstChar { it.uppercase(locale) }
-fun PayPeriod.subtitle(): String =
-    "Corte ${noveltiesFrom.format(shortDateFormat)} – ${noveltiesTo.format(shortDateFormat)} · pago ${payday.format(shortDateFormat)}"
+/*
+ * El corte se nombra por los días trabajados, no por el mes en que se paga: el 20 de noviembre
+ * la persona busca "lo de noviembre", no "diciembre". El pago va como dato secundario.
+ */
+fun PayPeriod.title(): String = "${noveltiesFrom.format(shortDateFormat)} – ${noveltiesTo.format(shortDateFormat)}"
+fun PayPeriod.subtitle(): String = "Se paga el ${payday.longLabel()}"
 
 /** Hora actual que se refresca sola, para el contador del turno abierto. */
 @Composable
@@ -127,6 +132,7 @@ fun PeriodSelector(pager: PagerState, cutoffDay: Int) {
                 period.subtitle(),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
             )
         }
         IconButton(onClick = { scope.launch { pager.animateScrollToPage(pager.currentPage + 1, animationSpec = Motion.standard()) } }) {

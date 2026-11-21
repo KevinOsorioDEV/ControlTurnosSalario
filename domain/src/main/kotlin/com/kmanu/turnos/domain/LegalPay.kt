@@ -33,19 +33,4 @@ object LegalPay {
         val values = at(date)
         return if (monthlySalary <= values.allowanceSalaryLimit) values.allowance else 0
     }
-
-    /**
-     * Valor personalizado que hay que guardar, o `null` si el auxilio debe seguir el valor de ley.
-     * Así, quien no lo ha cambiado sigue la ley aunque cambien su salario o el año.
-     */
-    fun customAllowanceToStore(
-        allowance: Long,
-        salary: Long,
-        previousCustom: Long?,
-        previousSalary: Long,
-        date: LocalDate,
-    ): Long? {
-        val untouched = previousCustom == null && allowance == allowanceFor(previousSalary, date)
-        return if (untouched || allowance == allowanceFor(salary, date)) null else allowance
-    }
 }

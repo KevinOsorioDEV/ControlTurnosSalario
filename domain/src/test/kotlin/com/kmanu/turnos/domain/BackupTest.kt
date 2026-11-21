@@ -26,7 +26,9 @@ class BackupTest {
             ),
             Shift("2", at("2026-11-11T08:00"), null, at("2026-11-11T16:00")),
         ),
-        salary = SalaryHistory.fixed(1_750_905).withChange(LocalDate.of(2027, 1, 1), 1_900_000),
+        salary = SalaryHistory.fixed(1_750_905)
+            .withChange(LocalDate.of(2027, 1, 1), 1_900_000)
+            .withChange(SalaryChange.minimumWage(LocalDate.of(2027, 6, 1))),
         settings = mapOf("cutoff_day" to "25", "worker_name" to "Persona de prueba"),
     )
 

@@ -34,6 +34,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import com.kmanu.turnos.domain.BreakPolicy
 import com.kmanu.turnos.domain.ColombiaHolidays
@@ -41,6 +44,7 @@ import com.kmanu.turnos.domain.PayrollCalculator
 import com.kmanu.turnos.domain.SalaryHistory
 import com.kmanu.turnos.domain.Shift
 import com.kmanu.turnos.domain.ShiftPlanner
+import com.kmanu.turnos.domain.ShiftValidation
 import com.kmanu.turnos.ui.theme.Radius
 import com.kmanu.turnos.ui.theme.Sizes
 import com.kmanu.turnos.ui.theme.Spacing
@@ -48,6 +52,7 @@ import com.kmanu.turnos.ui.theme.TurnosTheme
 import com.kmanu.turnos.ui.theme.tabular
 import java.time.Duration
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 
 private const val MINUTES_STEP = 15
@@ -67,6 +72,8 @@ fun ShiftEditor(
     salary: SalaryHistory,
     frequentShifts: List<Pair<LocalTime, LocalTime>>,
     knownAuthorizers: List<String>,
+    /** Todos los turnos guardados, para avisar de un cruce antes de tocar Guardar. */
+    otherShifts: List<Shift>,
     onDismiss: () -> Unit,
     onSave: (Shift) -> String?,
     onDelete: () -> Unit,
@@ -142,13 +149,20 @@ fun ShiftEditor(
         .takeWhile { it <= endAt.toLocalDate() }
         .any(ColombiaHolidays::isSundayOrHoliday)
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    // El mismo chequeo que al guardar, pero en vivo: el cruce se ve al elegir el día o la hora.
+    val liveProblem = remember(draft, otherShifts) { ShiftValidation.validate(draft, otherShifts, LocalDateTime.now()) }
+    val problem = liveProblem ?: error
 
-    BackHandler(onBack = onDismiss)
+    // Salir con cambios pregunta primero: un gesto de Atrás accidental no borra lo escrito.
+    val initialDraft = remember { draft }
+    var confirmingDiscard by remember { mutableStateOf(false) }
+    val leave = { if (draft != initialDraft) confirmingDiscard = true else onDismiss() }
+    BackHandler(onBack = leave)
 
     Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().imePadding()) {
             Row(Modifier.padding(start = Spacing.xs, top = Spacing.sm), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onDismiss) {
+                IconButton(onClick = leave) {
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Volver sin guardar")
                 }
                 Text(if (isNew) "Registrar turno" else "Editar turno", style = MaterialTheme.typography.titleLarge)
@@ -165,21 +179,10 @@ fun ShiftEditor(
 
                 if (isNew && frequentShifts.isNotEmpty()) {
                     Text("Tus turnos de siempre", style = MaterialTheme.typography.labelMedium, color = muted)
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                        verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-                    ) {
-                        frequentShifts.forEach { (start, end) ->
-                            PillChip(
-                                "${start.label()} – ${end.label()}",
-                                selected = start == startTime && end == endTime,
-                                onClick = {
-                                    startTime = start
-                                    endTime = end
-                                    extraMinutes = 0
-                                },
-                            )
-                        }
+                    ScheduleGrid(frequentShifts, selected = startTime to endTime) { start, end ->
+                        startTime = start
+                        endTime = end
+                        extraMinutes = 0
                     }
                 }
 
@@ -288,19 +291,22 @@ fun ShiftEditor(
                 }
             }
             Column(Modifier.padding(start = Spacing.md, end = Spacing.md, bottom = Spacing.md)) {
-                error?.let {
+                problem?.let {
                     Text(
                         it,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(bottom = Spacing.sm),
+                        // El lector de pantalla lo anuncia al aparecer, sin mover el foco.
+                        modifier = Modifier
+                            .padding(bottom = Spacing.sm)
+                            .semantics { liveRegion = LiveRegionMode.Polite },
                     )
                 }
                 PrimaryAction(
                     if (isNew) "Guardar turno" else "Guardar cambios",
                     onClick = {
-                        val problem = onSave(draft)
-                        if (problem == null) onSaved() else error = problem
+                        val saveProblem = onSave(draft)
+                        if (saveProblem == null) onSaved() else error = saveProblem
                     },
                 )
             }
@@ -341,6 +347,21 @@ fun ShiftEditor(
             error = null
             pickingDate = false
         }
+    }
+
+    if (confirmingDiscard) {
+        AlertDialog(
+            onDismissRequest = { confirmingDiscard = false },
+            title = { Text("¿Descartar los cambios?") },
+            text = { Text(if (isNew) "El turno no se guardará." else "El turno se queda como estaba.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmingDiscard = false
+                    onDismiss()
+                }) { Text("Descartar") }
+            },
+            dismissButton = { TextButton(onClick = { confirmingDiscard = false }) { Text("Seguir editando") } },
+        )
     }
 
     if (confirmingDelete) {

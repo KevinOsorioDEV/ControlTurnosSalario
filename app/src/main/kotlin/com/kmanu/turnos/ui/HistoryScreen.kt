@@ -21,11 +21,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Share
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -40,15 +41,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import com.kmanu.turnos.domain.Concept
 import com.kmanu.turnos.domain.ExcelReport
+import com.kmanu.turnos.domain.PaidInterval
 import com.kmanu.turnos.domain.PayrollCalculator
 import com.kmanu.turnos.domain.SalaryHistory
 import com.kmanu.turnos.domain.Shift
 import com.kmanu.turnos.domain.ShiftBreakdown
 import com.kmanu.turnos.ui.theme.Motion
 import com.kmanu.turnos.ui.theme.Radius
+import com.kmanu.turnos.ui.theme.Sizes
 import com.kmanu.turnos.ui.theme.Spacing
 import com.kmanu.turnos.ui.theme.StatusStyle
 import com.kmanu.turnos.ui.theme.TurnosColors
@@ -59,6 +64,7 @@ import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
 import java.util.UUID
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 
 private data class Editing(val shift: Shift, val isNew: Boolean) {
@@ -103,13 +109,33 @@ fun HistoryScreen(state: UiState, viewModel: AppViewModel, onEditorOpenChange: (
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("Historial", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
                                 PillChip(
-                                    "Exportar a Excel",
+                                    "Excel",
                                     selected = false,
                                     icon = Icons.Rounded.Share,
                                     onClick = {
                                         if (state.settings.workerName.isBlank()) askingName = true else export(state.settings.workerName)
                                     },
+                                    modifier = Modifier.semantics { contentDescription = "Exportar a Excel" },
                                 )
+                                // Va aquí y no flotando: sobre la lista tapaba las horas y el valor de la fila.
+                                Surface(
+                                    onClick = { editing = Editing(newShiftProposal(state), isNew = true) },
+                                    modifier = Modifier
+                                        .padding(start = Spacing.sm)
+                                        .size(Sizes.chip)
+                                        .sharedBounds(
+                                            rememberSharedContentState(NEW_SHIFT_KEY),
+                                            this@AnimatedContent,
+                                            boundsTransform = cardBounds,
+                                        ),
+                                    shape = CircleShape,
+                                    color = TurnosTheme.colors.active.container,
+                                    contentColor = TurnosTheme.colors.active.content,
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Rounded.Add, contentDescription = "Agregar turno")
+                                    }
+                                }
                             }
                             PeriodSelector(pager, state.settings.cutoffDay)
                         }
@@ -122,7 +148,7 @@ fun HistoryScreen(state: UiState, viewModel: AppViewModel, onEditorOpenChange: (
                                     start = Spacing.md,
                                     top = Spacing.sm,
                                     end = Spacing.md,
-                                    bottom = Spacing.fabClearance,
+                                    bottom = Spacing.md,
                                 ),
                                 verticalArrangement = Arrangement.spacedBy(Spacing.sm),
                             ) {
@@ -153,25 +179,6 @@ fun HistoryScreen(state: UiState, viewModel: AppViewModel, onEditorOpenChange: (
                             }
                         }
                     }
-                    FloatingActionButton(
-                        onClick = {
-                            val start = LocalDate.now().atTime(LocalTime.of(7, 0))
-                            val end = start.plusMinutes(state.settings.defaultShiftMinutes.toLong())
-                            val breakMinutes = state.settings.breakPolicy.minutesFor(Duration.between(start, end).toMinutes())
-                            editing = Editing(Shift(UUID.randomUUID().toString(), start, end, end, breakMinutes), isNew = true)
-                        },
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(Spacing.md)
-                            .sharedBounds(
-                                rememberSharedContentState(NEW_SHIFT_KEY),
-                                this@AnimatedContent,
-                                boundsTransform = cardBounds,
-                            ),
-                        shape = RoundedCornerShape(Radius.control),
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                    ) { Icon(Icons.Rounded.Add, contentDescription = "Agregar turno") }
                 }
             } else {
                 ShiftEditor(
@@ -187,6 +194,7 @@ fun HistoryScreen(state: UiState, viewModel: AppViewModel, onEditorOpenChange: (
                     salary = state.salary,
                     frequentShifts = state.frequentShifts,
                     knownAuthorizers = state.knownAuthorizers,
+                    otherShifts = state.shifts,
                     onDismiss = { editing = null },
                     onSave = viewModel::save,
                     onDelete = {
@@ -209,6 +217,28 @@ fun HistoryScreen(state: UiState, viewModel: AppViewModel, onEditorOpenChange: (
             },
         )
     }
+}
+
+/** Días hacia atrás en los que se busca un hueco para el turno nuevo. */
+private const val PROPOSAL_LOOKBACK_DAYS = 31
+private val FALLBACK_START: LocalTime = LocalTime.of(7, 0)
+
+/**
+ * Turno que se propone al tocar "+": el día más reciente que aún no tiene turno y el horario
+ * que más se repite. Así no se arranca sobre un turno ya registrado (y el error al guardar).
+ */
+private fun newShiftProposal(state: UiState): Shift {
+    val today = LocalDate.now()
+    val busyDays = state.shifts.map { it.start.toLocalDate() }.toSet()
+    val day = generateSequence(today) { it.minusDays(1) }
+        .take(PROPOSAL_LOOKBACK_DAYS)
+        .firstOrNull { it !in busyDays } ?: today
+    val (startTime, endTime) = state.frequentShifts.firstOrNull()
+        ?: (FALLBACK_START to FALLBACK_START.plusMinutes(state.settings.defaultShiftMinutes.toLong()))
+    val start = day.atTime(startTime)
+    val end = day.atTime(endTime).let { if (it.isAfter(start)) it else it.plusDays(1) }
+    val breakMinutes = state.settings.breakPolicy.minutesFor(Duration.between(start, end).toMinutes())
+    return Shift(UUID.randomUUID().toString(), start, end, end, breakMinutes)
 }
 
 /** Totales del corte, para no tener que ir a Liquidación a verlos. */
@@ -276,52 +306,61 @@ internal fun ShiftBreakdown.tags(colors: TurnosColors): List<Pair<String, Status
     if (extraMinutes > 0) add("${hours(extraMinutes)} extra" to colors.extra)
 }
 
+/** Lo marcado solo se muestra si se aleja del horario pagado más que el margen de puntualidad. */
+private fun Shift.markedFarFromPaid(paid: PaidInterval): Boolean {
+    val end = end ?: return false
+    val margin = marginMinutes.toLong()
+    return abs(Duration.between(start, paid.start).toMinutes()) > margin ||
+        abs(Duration.between(end, paid.end).toMinutes()) > margin
+}
+
+/**
+ * Fila de un turno. Primero lo que se paga (horario, horas y valor); lo marcado y las etiquetas
+ * solo aparecen cuando aportan algo, para que quepan más turnos por pantalla.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ShiftRow(shift: Shift, salary: SalaryHistory, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val colors = TurnosTheme.colors
+    val variant = MaterialTheme.colorScheme.onSurfaceVariant
     val breakdown = shift.end?.let { PayrollCalculator.breakdown(shift, salary) }
     val missingAuthorizer = breakdown != null && shift.authorizedBy.isNullOrBlank() &&
         breakdown.lines.any { it.concept in EXTRA_CONCEPTS }
     val tags = (breakdown?.tags(colors) ?: listOf("En curso" to colors.active)) +
         if (missingAuthorizer) listOf(ExcelReport.MISSING_AUTHORIZER to colors.extra) else emptyList()
-    // Solo se muestra si difiere de lo marcado, para no repetir el mismo horario.
-    val paid = shift.end?.let { PayrollCalculator.paidInterval(shift) }?.takeIf { it.start != shift.start || it.end != shift.end }
+    val paid = shift.end?.let { PayrollCalculator.paidInterval(shift) }
+    val range = if (paid != null) {
+        "${paid.start.timeLabel()} – ${paid.end.timeLabel()}"
+    } else {
+        "${shift.start.timeLabel()} – en curso"
+    }
+    val marked = paid?.takeIf(shift::markedFarFromPaid)?.let { "Marcaste ${shift.start.timeLabel()} – ${shift.end?.timeLabel().orEmpty()}" }
     Surface(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(Radius.card),
         color = colors.card,
     ) {
-        Row(Modifier.padding(Spacing.md), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                Text(shift.start.toLocalDate().label(), style = MaterialTheme.typography.titleSmall)
-                Text(
-                    "${shift.start.timeLabel()} – ${shift.end?.timeLabel() ?: "en curso"}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                paid?.let {
-                    Text(
-                        "Se paga ${it.start.timeLabel()} – ${it.end.timeLabel()}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (tags.isNotEmpty()) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
-                        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
-                    ) { tags.forEach { (text, style) -> StatusPill(text, style) } }
+        Column(
+            Modifier.padding(horizontal = Spacing.md, vertical = Spacing.ms),
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Text(shift.start.toLocalDate().label(), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                if (breakdown != null) Text(hours(breakdown.workedMinutes), style = MaterialTheme.typography.bodyMedium.tabular())
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                Text(range, style = MaterialTheme.typography.bodyMedium, color = variant, modifier = Modifier.weight(1f))
+                if (breakdown != null && breakdown.total > 0) {
+                    Text(money(breakdown.total), style = MaterialTheme.typography.titleSmall.tabular())
                 }
             }
-            if (breakdown != null) {
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(hours(breakdown.workedMinutes), style = MaterialTheme.typography.bodyMedium)
-                    if (breakdown.total > 0) {
-                        Text(money(breakdown.total), style = MaterialTheme.typography.titleSmall)
-                    }
-                }
+            marked?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = variant) }
+            if (tags.isNotEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                ) { tags.forEach { (text, style) -> StatusPill(text, style) } }
             }
         }
     }

@@ -24,6 +24,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import com.kmanu.turnos.domain.LegalPay
 import com.kmanu.turnos.domain.PayPeriod
+import com.kmanu.turnos.domain.SalaryChange
+import com.kmanu.turnos.domain.SalaryHistory
 import com.kmanu.turnos.ui.theme.Radius
 import com.kmanu.turnos.ui.theme.Spacing
 import com.kmanu.turnos.ui.theme.TurnosTheme
@@ -31,17 +33,18 @@ import java.time.LocalDate
 
 /** Primera pantalla al instalar: pide el salario y el día de corte; el auxilio sale de la ley. */
 @Composable
-fun OnboardingScreen(onDone: (salary: Long, cutoffDay: Int) -> Unit) {
+fun OnboardingScreen(onDone: (salary: SalaryHistory, cutoffDay: Int) -> Unit) {
     var text by remember { mutableStateOf("") }
+    var minimum by remember { mutableStateOf(false) }
     var showError by remember { mutableStateOf(false) }
     var cutoffText by remember { mutableStateOf(PayPeriod.DEFAULT_CUTOFF_DAY.toString()) }
     val cutoffDay = cutoffText.toIntOrNull()?.takeIf { it in PayPeriod.MIN_CUTOFF_DAY..PayPeriod.MAX_CUTOFF_DAY }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
 
-    val salary = text.toLongOrNull()?.takeIf { it > 0 }
     val today = LocalDate.now()
     val legal = LegalPay.at(today)
+    val salary = if (minimum) legal.minimumWage else text.toLongOrNull()?.takeIf { it > 0 }
     val allowance = LegalPay.allowanceFor(salary ?: 0, today)
     val allowanceDetail = if (salary != null && allowance == 0L) {
         "No aplica: la ley lo da a quienes ganan hasta ${money(legal.allowanceSalaryLimit)}."
@@ -78,18 +81,34 @@ fun OnboardingScreen(onDone: (salary: Long, cutoffDay: Int) -> Unit) {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        FilledField(
-                            value = text,
-                            onValueChange = {
-                                text = it.filter(Char::isDigit)
+                        PillChip(
+                            "Gano el salario mínimo",
+                            selected = minimum,
+                            onClick = {
+                                minimum = !minimum
                                 showError = false
                             },
-                            label = "Salario mensual",
-                            modifier = Modifier.focusRequester(focus),
-                            isError = showError,
-                            prefix = "$",
-                            transformation = ThousandsTransformation,
                         )
+                        if (minimum) {
+                            AmountRow(
+                                "Salario mínimo ${today.year}",
+                                money(legal.minimumWage),
+                                "Sube solo cada año con el decreto.",
+                            )
+                        } else {
+                            FilledField(
+                                value = text,
+                                onValueChange = {
+                                    text = it.filter(Char::isDigit)
+                                    showError = false
+                                },
+                                label = "Salario mensual",
+                                modifier = Modifier.focusRequester(focus),
+                                isError = showError,
+                                prefix = "$",
+                                transformation = ThousandsTransformation,
+                            )
+                        }
                         if (showError) {
                             Text(
                                 "Escribe un salario mayor que cero.",
@@ -130,7 +149,14 @@ fun OnboardingScreen(onDone: (salary: Long, cutoffDay: Int) -> Unit) {
                 onClick = {
                     when {
                         salary == null -> showError = true
-                        cutoffDay != null -> onDone(salary, cutoffDay)
+                        cutoffDay != null -> onDone(
+                            if (minimum) {
+                                SalaryHistory(listOf(SalaryChange.minimumWage(SalaryHistory.SINCE_ALWAYS)))
+                            } else {
+                                SalaryHistory.fixed(salary)
+                            },
+                            cutoffDay,
+                        )
                     }
                 },
                 modifier = Modifier.padding(start = Spacing.md, end = Spacing.md, bottom = Spacing.md),

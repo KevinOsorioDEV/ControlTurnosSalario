@@ -25,7 +25,8 @@ import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.rounded.AccountBalanceWallet
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Schedule
-import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -65,7 +66,7 @@ private enum class Tab(val label: String, val icon: ImageVector, val selectedIco
     SHIFT("Turno", Icons.Outlined.Schedule, Icons.Rounded.Schedule),
     HISTORY("Historial", Icons.Outlined.CalendarMonth, Icons.Rounded.CalendarMonth),
     LIQUIDATION("Liquidación", Icons.Outlined.AccountBalanceWallet, Icons.Rounded.AccountBalanceWallet),
-    SETTINGS("Ajustes", Icons.Rounded.Tune, Icons.Rounded.Tune),
+    SETTINGS("Ajustes", Icons.Outlined.Settings, Icons.Rounded.Settings),
 }
 
 class MainActivity : FragmentActivity() {
@@ -192,7 +193,7 @@ private fun MainShell(
                     label = "pestañas",
                 ) { selected ->
                     when (selected) {
-                        Tab.SHIFT -> ShiftScreen(current, viewModel)
+                        Tab.SHIFT -> ShiftScreen(current, viewModel, onOpenLiquidation = { tab = Tab.LIQUIDATION })
                         Tab.HISTORY -> HistoryScreen(current, viewModel, onEditorOpenChange = { editorOpen = it })
                         Tab.LIQUIDATION -> LiquidationScreen(current, viewModel)
                         Tab.SETTINGS -> SettingsScreen(current.settings, viewModel, lockEnabled, onLockChange)

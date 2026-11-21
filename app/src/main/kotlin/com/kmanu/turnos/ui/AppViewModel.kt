@@ -16,6 +16,7 @@ import com.kmanu.turnos.data.SettingsStore
 import com.kmanu.turnos.data.ShiftReminder
 import com.kmanu.turnos.data.ShiftRepository
 import com.kmanu.turnos.data.UserSettings
+import com.kmanu.turnos.domain.AllowanceHistory
 import com.kmanu.turnos.domain.Backup
 import com.kmanu.turnos.domain.ExcelReport
 import com.kmanu.turnos.domain.Liquidation
@@ -89,7 +90,9 @@ data class UiState(
     val frequentShifts: List<Pair<LocalTime, LocalTime>> by lazy {
         shifts
             .mapNotNull { shift ->
-                shift.scheduledStart?.let { it to shift.scheduledEnd } ?: shift.end?.let { shift.start to it }
+                // Lo marcado a mano se redondea: 5:59 y 6:00 son el mismo horario.
+                shift.scheduledStart?.let { it to shift.scheduledEnd }
+                    ?: shift.end?.let { shift.start.toQuarterHour() to it.toQuarterHour() }
             }
             .filter { (start, end) -> Duration.between(start, end).toMinutes() >= MIN_FREQUENT_SHIFT_MINUTES }
             .groupingBy { (start, end) -> start.toLocalTime() to end.toLocalTime() }
@@ -99,6 +102,13 @@ data class UiState(
             .take(MAX_FREQUENT_SHIFTS)
             .map { it.key }
     }
+}
+
+private const val QUARTER_HOUR = 15L
+
+private fun LocalDateTime.toQuarterHour(): LocalDateTime {
+    val minutes = hour * 60L + minute
+    return toLocalDate().atStartOfDay().plusMinutes((minutes + QUARTER_HOUR / 2) / QUARTER_HOUR * QUARTER_HOUR)
 }
 
 private const val MIN_FREQUENT_SHIFT_MINUTES = 60L
@@ -135,11 +145,15 @@ class AppViewModel(
     val access: StateFlow<AppAccess?> = settingsStore.access.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     init {
-        // El aviso de salida sigue al turno abierto, se marque, se edite o se borre.
+        // Los avisos siguen al turno abierto (se marque, se edite o se borre) y a los minutos de
+        // aviso en Ajustes: cambiar cualquiera de los dos los reprograma.
         viewModelScope.launch {
-            repository.shifts.map { shifts -> shifts.firstOrNull { it.end == null } }
+            combine(
+                repository.shifts.map { shifts -> shifts.firstOrNull { it.end == null } },
+                settingsStore.settings.map { it.exitNoticeMinutes },
+            ) { open, minutes -> open to minutes }
                 .distinctUntilChanged()
-                .collect(reminder::sync)
+                .collect { (open, minutes) -> reminder.sync(open, minutes) }
         }
         viewModelScope.launch {
             settingsStore.manualDrafts.first()?.let { manualDrafts.putAll(decodeDrafts(it)) }
@@ -171,7 +185,7 @@ class AppViewModel(
         viewModelScope.launch { settingsStore.setLockEnabled(enabled) }
     }
 
-    fun completeSetup(salary: Long, cutoffDay: Int) {
+    fun completeSetup(salary: SalaryHistory, cutoffDay: Int) {
         viewModelScope.launch { settingsStore.completeSetup(salary, cutoffDay) }
     }
 
@@ -300,18 +314,33 @@ class AppViewModel(
 
     fun saveWorkerName(name: String) {
         val current = state.value ?: return
-        viewModelScope.launch { settingsStore.save(current.settings.copy(workerName = name), salaryChangeStart()) }
+        viewModelScope.launch { settingsStore.save(current.settings.copy(workerName = name)) }
     }
 
-    /** Un salario nuevo aplica desde el primer día del mes en curso, que es el mes que se paga. */
+    /** Fecha sugerida para un salario nuevo: el primer día del mes en curso, que es el mes que se paga. */
     fun salaryChangeStart(): LocalDate = YearMonth.now(clock).atDay(1)
 
-    /** [salarySince] dice desde cuándo aplica un salario nuevo; ver [SettingsStore.save]. */
-    fun saveSettings(settings: UserSettings, salarySince: LocalDate = salaryChangeStart()) {
+    fun today(): LocalDate = LocalDate.now(clock)
+
+    fun saveSalaryHistory(history: SalaryHistory, message: String = "Salario guardado") {
+        viewModelScope.launch {
+            settingsStore.saveSalaryHistory(history)
+            _messages.emit(message)
+        }
+    }
+
+    fun saveAllowanceHistory(history: AllowanceHistory, message: String = "Auxilio guardado") {
+        viewModelScope.launch {
+            settingsStore.saveAllowanceHistory(history)
+            _messages.emit(message)
+        }
+    }
+
+    fun saveSettings(settings: UserSettings) {
         // Con otro día de corte, el corte en curso puede ser otro mes.
         if (state.value?.settings?.cutoffDay != settings.cutoffDay) selectedMonth.value = null
         viewModelScope.launch {
-            settingsStore.save(settings, salarySince)
+            settingsStore.save(settings)
             _messages.emit("Ajustes guardados")
         }
     }

@@ -121,7 +121,7 @@ private fun String.stepped(delta: BigDecimal): String {
 @Composable
 fun LiquidationModeSelector(manual: Boolean, onChange: (Boolean) -> Unit) {
     PillTabs(
-        options = listOf("Mis turnos", "Ingresar horas"),
+        options = listOf("Mis turnos", "Simular"),
         selected = if (manual) 1 else 0,
         onSelect = { onChange(it == 1) },
         modifier = Modifier.fillMaxWidth().padding(top = Spacing.sm),
@@ -136,6 +136,7 @@ fun ManualLiquidation(
     onDraftChange: (ManualDraft) -> Unit,
     detailOpen: Boolean,
     onToggleDetail: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val rules = remember(period) { LaborRules.at(period.noveltiesTo) }
     val changesInCut = remember(period) { LaborRules.at(period.noveltiesFrom) != rules }
@@ -174,10 +175,10 @@ fun ManualLiquidation(
         onDraftChange(draft.copy(hours = hours))
     }
 
-    Column(Modifier.fillMaxSize().imePadding()) {
+    Column(modifier.fillMaxSize().imePadding()) {
         // El neto se queda arriba: se ve cambiar mientras se ingresan las horas.
         Box(Modifier.padding(start = Spacing.md, end = Spacing.md, top = Spacing.sm)) {
-            NetCard(result, showProgressNote = false)
+            NetCard(result, simulated = true)
         }
         Column(
             Modifier
@@ -213,7 +214,7 @@ fun ManualLiquidation(
             }
 
             AccordionCard(
-                title = "Datos de este corte",
+                title = "Datos para el cálculo",
                 open = dataOpen || anyDataInvalid,
                 onToggle = { dataOpen = !dataOpen },
             ) {
@@ -244,7 +245,7 @@ fun ManualLiquidation(
                 FilledField(divisorText, { onDraftChange(draft.copy(monthlyHours = it.keepDigits())) }, "Divisor de horas del mes", isError = divisor == null)
                 if (changesInCut) {
                     Text(
-                        "En este corte cambió la ley. Sugerimos los valores vigentes al ${period.noveltiesTo.shortLabel()}; " +
+                        "Este mes cambió la ley. Sugerimos los valores vigentes al ${period.noveltiesTo.shortLabel()}; " +
                             "ajústalos si tu empresa liquidó con otros.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -252,7 +253,7 @@ fun ManualLiquidation(
                 }
             }
 
-            CalculationCard(result, open = detailOpen, onToggle = onToggleDetail, workedLabel = "Horas con recargo o extra")
+            CalculationCard(result, open = detailOpen, onToggle = onToggleDetail, workedLabel = "Horas con recargo o extra", netLabel = "Neto simulado")
         }
     }
 }

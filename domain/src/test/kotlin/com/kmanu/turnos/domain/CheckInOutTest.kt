@@ -49,4 +49,18 @@ class CheckInOutTest {
     fun `recuerda la salida media hora despues del margen`() {
         assertThat(ShiftPlanner.reminderAt(open)).isEqualTo(at("2026-11-10T14:15"))
     }
+
+    @Test
+    fun `avisa los minutos configurados antes de la salida`() {
+        // Salida programada 1:30 p. m.
+        assertThat(ShiftPlanner.exitNoticeAt(open, 10, now)).isEqualTo(at("2026-11-10T13:20"))
+    }
+
+    @Test
+    fun `no avisa si esta desactivado, si ya paso la hora o si el turno se cerro`() {
+        assertThat(ShiftPlanner.exitNoticeAt(open, 0, now)).isNull()
+        assertThat(ShiftPlanner.exitNoticeAt(open, 10, at("2026-11-10T13:25"))).isNull()
+        assertThat(ShiftPlanner.exitNoticeAt(open, 10, at("2026-11-10T13:20"))).isNull()
+        assertThat(ShiftPlanner.exitNoticeAt(open.copy(end = at("2026-11-10T12:00")), 10, now)).isNull()
+    }
 }

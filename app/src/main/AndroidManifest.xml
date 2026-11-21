@@ -3,6 +3,14 @@
 
     <!-- Recordatorio si olvidas marcar la salida. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Avisos al minuto exacto. Solo muestran una notificación; no son alarmas de despertador.
+         USE_EXACT_ALARM se concede solo desde Android 13; en 12 se usa SCHEDULE_EXACT_ALARM. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32" />
+    <!-- Volver a programar los avisos después de reiniciar el teléfono. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".TurnosApplication"
@@ -25,6 +33,15 @@
         <receiver
             android:name=".data.ShiftReminderReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".data.RescheduleReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

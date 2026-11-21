@@ -27,24 +27,4 @@ class LegalPayTest {
     fun `un anio sin decreto usa el ultimo conocido`() {
         assertThat(LegalPay.at(LocalDate.of(2030, 1, 1))).isEqualTo(LegalPay.at(today))
     }
-
-    @Test
-    fun `el valor de ley no se guarda como personalizado`() {
-        assertThat(LegalPay.customAllowanceToStore(249_095, 2_800_000, null, 2_800_000, today)).isNull()
-    }
-
-    @Test
-    fun `un valor distinto queda guardado`() {
-        assertThat(LegalPay.customAllowanceToStore(300_000, 2_800_000, null, 2_800_000, today)).isEqualTo(300_000)
-    }
-
-    @Test
-    fun `si no lo habia cambiado sigue la ley al subir el salario`() {
-        assertThat(LegalPay.customAllowanceToStore(249_095, 5_000_000, null, 2_800_000, today)).isNull()
-    }
-
-    @Test
-    fun `si lo habia personalizado se conserva al subir el salario`() {
-        assertThat(LegalPay.customAllowanceToStore(300_000, 5_000_000, 300_000, 2_800_000, today)).isEqualTo(300_000)
-    }
 }

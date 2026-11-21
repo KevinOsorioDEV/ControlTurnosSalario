@@ -14,8 +14,6 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,7 +21,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -40,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import com.kmanu.turnos.domain.PayPeriod
 import com.kmanu.turnos.domain.PayrollCalculator
 import com.kmanu.turnos.domain.SalaryHistory
 import com.kmanu.turnos.domain.Shift
@@ -88,7 +90,7 @@ private fun Hero.style(): StatusStyle {
 }
 
 @Composable
-fun ShiftScreen(state: UiState, viewModel: AppViewModel) {
+fun ShiftScreen(state: UiState, viewModel: AppViewModel, onOpenLiquidation: () -> Unit) {
     val now = rememberNow()
     // El turno recién cerrado se muestra hasta que la persona toca "Listo".
     var closingId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -136,6 +138,10 @@ fun ShiftScreen(state: UiState, viewModel: AppViewModel) {
                 }
             }
         }
+        CutSummaryCard(state, now.toLocalDate()) { period ->
+            viewModel.selectPeriod(period)
+            onOpenLiquidation()
+        }
         if (hero !is Hero.Closed) {
             state.lastClosedShift?.let { LastShiftCard(it, state.salary) }
         }
@@ -150,7 +156,6 @@ private fun dayNote(date: LocalDate, today: LocalDate): String = when (date) {
     else -> "mañana"
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CheckInContent(state: UiState, now: LocalDateTime, onCheckIn: (LocalDateTime, LocalDateTime, Int) -> Unit) {
     var chosen by remember { mutableStateOf(state.lastSchedule) }
@@ -189,18 +194,7 @@ private fun CheckInContent(state: UiState, now: LocalDateTime, onCheckIn: (Local
             ) { picking = PlanField.END }
         }
         if (state.frequentShifts.isNotEmpty()) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-            ) {
-                state.frequentShifts.forEach { (start, end) ->
-                    PillChip(
-                        "${start.label()} – ${end.label()}",
-                        selected = start == startTime && end == endTime,
-                        onClick = { chosen = start to end },
-                    )
-                }
-            }
+            ScheduleGrid(state.frequentShifts, selected = startTime to endTime) { start, end -> chosen = start to end }
         }
         if (policy.minutes > 0) {
             FilledField(
@@ -390,7 +384,32 @@ fun BreakdownLines(breakdown: ShiftBreakdown, detailColor: Color = MaterialTheme
     breakdown.lines.forEach { line ->
         AmountRow(line.concept.label, money(line.amount), hours(line.minutes), detailColor = detailColor)
     }
-    if (breakdown.lines.isNotEmpty()) {
+    // Con un solo concepto, el total repetiría la misma cifra.
+    if (breakdown.lines.size > 1) {
         AmountRow("Recargos y extras", money(breakdown.total), emphasized = true)
+    }
+}
+
+/** Lo acumulado en el corte en curso, a un toque de la liquidación completa. */
+@Composable
+private fun CutSummaryCard(state: UiState, today: LocalDate, onOpen: (PayPeriod) -> Unit) {
+    val period = remember(today, state.settings.cutoffDay) { PayPeriod.containing(today, state.settings.cutoffDay) }
+    val liquidation = remember(state.shifts, state.settings, period) { state.copy(period = period).liquidation }
+    val variant = MaterialTheme.colorScheme.onSurfaceVariant
+    Surface(
+        onClick = { onOpen(period) },
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(Radius.card),
+        color = TurnosTheme.colors.card,
+    ) {
+        Column(Modifier.padding(Spacing.md)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Este corte", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text("pago ${period.payday.shortLabel()}", style = MaterialTheme.typography.bodySmall, color = variant)
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Ver liquidación", tint = variant)
+            }
+            AmountRow("Recargos y extras", money(liquidation.noveltiesTotal), "${hours(liquidation.workedMinutes)} en turnos cerrados")
+            AmountRow("Neto estimado", money(liquidation.net), emphasized = true)
+        }
     }
 }

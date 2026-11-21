@@ -49,6 +49,16 @@ object ShiftPlanner {
     fun reminderAt(shift: Shift): LocalDateTime =
         shift.scheduledEnd.plusMinutes(shift.marginMinutes + REMINDER_AFTER_MINUTES)
 
+    /**
+     * Cuándo avisar que la salida se acerca, o `null` si no aplica: aviso desactivado
+     * ([minutesBefore] en 0), turno cerrado, o la hora del aviso ya pasó (por ejemplo, si se
+     * marcó la entrada tarde en un turno corto).
+     */
+    fun exitNoticeAt(shift: Shift, minutesBefore: Int, now: LocalDateTime): LocalDateTime? {
+        if (minutesBefore <= 0 || shift.end != null) return null
+        return shift.scheduledEnd.minusMinutes(minutesBefore.toLong()).takeIf { it.isAfter(now) }
+    }
+
     /** Si el turno sigue abierto mucho después de su salida: hay que preguntar a qué hora salió. */
     fun looksForgotten(shift: Shift, now: LocalDateTime): Boolean =
         shift.end == null && now.isAfter(shift.scheduledEnd.plusMinutes(shift.marginMinutes + FORGOTTEN_AFTER_MINUTES))

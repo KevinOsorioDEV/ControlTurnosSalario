@@ -22,7 +22,9 @@ object Backup {
         linkedMapOf(
             "formato" to FORMAT,
             "version" to VERSION,
-            "salarios" to data.salary.changes.map { mapOf("desde" to it.from.toString(), "salario" to it.monthlySalary) },
+            "salarios" to data.salary.changes.map {
+                mapOf("desde" to it.from.toString(), "salario" to it.monthlySalary, "minimo" to it.minimumWage)
+            },
             "ajustes" to data.settings,
             "turnos" to data.shifts.map(::shiftToMap),
         ),
@@ -37,7 +39,12 @@ object Backup {
         return runCatching {
             val salary = (root["salarios"] as List<*>).map { entry ->
                 val map = entry as Map<*, *>
-                SalaryChange(LocalDate.parse(map["desde"] as String), (map["salario"] as Number).toLong())
+                SalaryChange(
+                    from = LocalDate.parse(map["desde"] as String),
+                    monthlySalary = (map["salario"] as Number).toLong(),
+                    // Las copias anteriores a esta opción no traen el campo.
+                    minimumWage = map["minimo"] as? Boolean ?: false,
+                )
             }
             BackupData(
                 shifts = (root["turnos"] as List<*>).map { shiftFromMap(it as Map<*, *>) },

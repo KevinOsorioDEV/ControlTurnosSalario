@@ -127,12 +127,30 @@ data class TurnosColors(
     val closed: StatusStyle = StatusStyle(Color(0xFF0B6E4F), White, actionContainer = White, actionContent = Ink),
     val night: StatusStyle = StatusStyle(Color(0xFF1E2A44), White),
     val holiday: StatusStyle = StatusStyle(Color(0xFF6A3FB5), White),
+    /**
+     * Opción elegida en chips y rejillas: el mismo azul sólido del botón principal en claro y en
+     * oscuro, para que la app tenga un solo azul de "esto es lo tuyo".
+     */
+    val selected: StatusStyle = StatusStyle(Color(0xFF1F5FA8), White),
+    /** Carril del selector de dos opciones y la píldora que marca la elegida (más clara que el carril). */
+    val segmentTrack: Color,
+    val segmentThumb: Color,
 )
 
-private val LightTurnosColors = TurnosColors(card = Color(0xFFFFFFFF))
+private val LightTurnosColors = TurnosColors(
+    card = Color(0xFFFFFFFF),
+    segmentTrack = Color(0xFFE1E4EB),
+    segmentThumb = Color(0xFFFFFFFF),
+)
 
 // El azul noche se perdería contra la tarjeta oscura: en oscuro se aclara.
-private val DarkTurnosColors = TurnosColors(card = Color(0xFF1C2029), night = StatusStyle(Color(0xFF3A4D7A), White))
+// En oscuro el carril se hunde y la píldora se levanta: la opción elegida es la más clara.
+private val DarkTurnosColors = TurnosColors(
+    card = Color(0xFF212631),
+    night = StatusStyle(Color(0xFF3A4D7A), White),
+    segmentTrack = Color(0xFF161A22),
+    segmentThumb = Color(0xFF444B5A),
+)
 
 private val LocalTurnosColors = staticCompositionLocalOf { LightTurnosColors }
 

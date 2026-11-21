@@ -64,16 +64,19 @@ enum class Concept(val label: String) {
 /**
  * Datos de pago de la persona.
  *
- * @property customAllowance auxilio que paga la empresa; `null` sigue el valor de ley de cada año.
+ * @property allowance auxilio con sus fechas de vigencia; por defecto sigue la ley de cada año.
  */
 data class PaySettings(
     val salary: SalaryHistory,
-    val customAllowance: Long? = null,
+    val allowance: AllowanceHistory = AllowanceHistory.LEGAL,
 ) {
+    /** Salario con historial y un auxilio fijo para todas las fechas. */
+    constructor(salary: SalaryHistory, monthlyAllowance: Long) : this(salary, AllowanceHistory.fixed(monthlyAllowance))
+
     /** Salario y auxilio fijos, sin historial. */
     constructor(monthlySalary: Long, monthlyAllowance: Long) : this(SalaryHistory.fixed(monthlySalary), monthlyAllowance)
 
-    fun allowanceAt(date: LocalDate): Long = customAllowance ?: LegalPay.allowanceFor(salary.at(date), date)
+    fun allowanceAt(date: LocalDate): Long = allowance.at(date, salary.at(date))
 }
 
 /**

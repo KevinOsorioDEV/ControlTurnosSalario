@@ -1,5 +1,6 @@
 package com.kmanu.turnos.ui
 
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
@@ -100,8 +101,9 @@ fun PrimaryAction(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    container: Color = MaterialTheme.colorScheme.primary,
-    content: Color = MaterialTheme.colorScheme.onPrimary,
+    // El azul de marca en claro y en oscuro: el botón principal se ve igual en toda la app.
+    container: Color = TurnosTheme.colors.active.container,
+    content: Color = TurnosTheme.colors.active.content,
 ) {
     Button(
         onClick = onClick,
@@ -203,22 +205,50 @@ fun PillChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
+    /** Ocupa todo el ancho que le den, con el texto centrado (para cuadrículas). */
+    fill: Boolean = false,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val chosen = TurnosTheme.colors.selected
     Surface(
         onClick = onClick,
         modifier = modifier.heightIn(min = Sizes.chip).semantics { this.selected = selected },
         shape = CircleShape,
-        color = if (selected) scheme.primary else scheme.surfaceContainerHigh,
-        contentColor = if (selected) scheme.onPrimary else scheme.onSurface,
+        color = if (selected) chosen.container else scheme.surfaceContainerHigh,
+        contentColor = if (selected) chosen.content else scheme.onSurface,
     ) {
         Row(
-            Modifier.padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            (if (fill) Modifier.fillMaxWidth() else Modifier).padding(horizontal = Spacing.md, vertical = Spacing.sm),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.xs, Alignment.CenterHorizontally),
         ) {
             icon?.let { Icon(it, contentDescription = null, Modifier.size(Sizes.chipIcon)) }
-            Text(text, style = MaterialTheme.typography.labelLarge)
+            Text(text, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+/** Horarios frecuentes en dos columnas parejas; se usa al marcar entrada y al registrar un turno. */
+@Composable
+fun ScheduleGrid(
+    options: List<Pair<LocalTime, LocalTime>>,
+    selected: Pair<LocalTime, LocalTime>,
+    onSelect: (LocalTime, LocalTime) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        options.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                row.forEach { (start, end) ->
+                    PillChip(
+                        "${start.label()} – ${end.label()}",
+                        selected = start to end == selected,
+                        onClick = { onSelect(start, end) },
+                        modifier = Modifier.weight(1f),
+                        fill = true,
+                    )
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
         }
     }
 }
@@ -227,7 +257,9 @@ fun PillChip(
 @Composable
 fun PillTabs(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
     val position by animateFloatAsState(selected.toFloat(), Motion.standard(), label = "selector")
-    Surface(modifier, shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+    val colors = TurnosTheme.colors
+    val scheme = MaterialTheme.colorScheme
+    Surface(modifier, shape = CircleShape, color = colors.segmentTrack) {
         BoxWithConstraints(Modifier.padding(Spacing.xs)) {
             val itemWidth = maxWidth / options.size
             Box(Modifier.matchParentSize()) {
@@ -237,7 +269,8 @@ fun PillTabs(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modi
                         .width(itemWidth)
                         .fillMaxHeight(),
                     shape = CircleShape,
-                    color = TurnosTheme.colors.card,
+                    color = colors.segmentThumb,
+                    shadowElevation = Sizes.segmentShadow,
                 ) {}
             }
             Row(Modifier.fillMaxWidth().selectableGroup()) {
@@ -249,7 +282,16 @@ fun PillTabs(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modi
                             .clip(CircleShape)
                             .selectable(selected = index == selected, role = Role.Tab) { onSelect(index) },
                         contentAlignment = Alignment.Center,
-                    ) { Text(option, style = MaterialTheme.typography.labelLarge) }
+                    ) {
+                        // Además del fondo, la elegida va en negrita y la otra atenuada: no depende solo del color.
+                        val isSelected = index == selected
+                        Text(
+                            option,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (isSelected) scheme.onSurface else scheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -356,6 +398,7 @@ private const val GRID_COLUMNS = 6
 @Composable
 private fun SelectionGrid(options: List<Int>, selected: Int, onSelect: (Int) -> Unit, label: (Int) -> String) {
     val scheme = MaterialTheme.colorScheme
+    val chosen = TurnosTheme.colors.selected
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
         options.chunked(GRID_COLUMNS).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
@@ -364,8 +407,8 @@ private fun SelectionGrid(options: List<Int>, selected: Int, onSelect: (Int) -> 
                         onClick = { onSelect(option) },
                         modifier = Modifier.weight(1f).height(Sizes.gridCell).semantics { this.selected = option == selected },
                         shape = RoundedCornerShape(Radius.control),
-                        color = if (option == selected) scheme.primary else scheme.surfaceContainer,
-                        contentColor = if (option == selected) scheme.onPrimary else scheme.onSurface,
+                        color = if (option == selected) chosen.container else scheme.surfaceContainer,
+                        contentColor = if (option == selected) chosen.content else scheme.onSurface,
                     ) {
                         Box(contentAlignment = Alignment.Center) { Text(label(option), style = MaterialTheme.typography.titleSmall) }
                     }

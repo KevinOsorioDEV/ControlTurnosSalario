@@ -13,9 +13,6 @@ object Spacing {
     val ms = 12.dp
     val md = 16.dp
     val lg = 24.dp
-
-    /** Espacio al final de una lista para que el botón flotante no tape la última fila. */
-    val fabClearance = 96.dp
 }
 
 /** Esquinas: tarjeta principal, tarjetas de lista y controles. */
@@ -28,11 +25,13 @@ object Radius {
 
 object Sizes {
     val action = 56.dp
-    val chip = 40.dp
+    val chip = 48.dp
     val chipIcon = 18.dp
     val gridCell = 44.dp
     val counterValue = 52.dp
     val focusBorder = 2.dp
+    /** Sombra mínima que despega la píldora elegida del carril del selector. */
+    val segmentShadow = 1.dp
     val lockBadge = 88.dp
     val lockIcon = 40.dp
 }

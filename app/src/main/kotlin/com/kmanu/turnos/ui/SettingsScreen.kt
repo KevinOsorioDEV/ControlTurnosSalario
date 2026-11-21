@@ -40,7 +40,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import com.kmanu.turnos.data.UserSettings
 import com.kmanu.turnos.domain.PayPeriod
-import com.kmanu.turnos.domain.SalaryHistory
 import com.kmanu.turnos.ui.theme.Radius
 import com.kmanu.turnos.ui.theme.Spacing
 import com.kmanu.turnos.ui.theme.TurnosTheme
@@ -63,17 +62,23 @@ private class SettingItem(
     val label: String,
     val error: String,
     val help: String? = null,
+    /** Nombre en la lista cuando el completo no cabe en una línea. */
+    val shortLabel: String? = null,
+    /** Algunos datos solo tienen sentido según otros. */
+    val visible: (UserSettings) -> Boolean = { true },
     val isMoney: Boolean = false,
     val decimal: Boolean = false,
     val isText: Boolean = false,
-    /** Al cambiarlo se pregunta desde cuándo aplica. */
-    val asksSince: Boolean = false,
+    /** El salario y el auxilio se editan en su propia hoja, con historial y fecha. */
+    val isSalary: Boolean = false,
+    val isAllowance: Boolean = false,
     val shown: (UserSettings) -> String,
     val text: (UserSettings) -> String,
     val apply: (UserSettings, String) -> UserSettings?,
 )
 
 private const val MAX_MARGIN_MINUTES = 120
+private const val MAX_EXIT_NOTICE_MINUTES = 120
 
 private val PAY_ITEMS = listOf(
     SettingItem(
@@ -89,19 +94,23 @@ private val PAY_ITEMS = listOf(
         label = "Salario mensual",
         error = "Escribe un salario mayor que cero.",
         isMoney = true,
-        asksSince = true,
-        shown = { money(it.monthlySalary) },
+        isSalary = true,
+        shown = {
+            if (it.salaryHistory.changeAt(LocalDate.now()).minimumWage) "Mínimo · ${money(it.monthlySalary)}" else money(it.monthlySalary)
+        },
         text = { it.monthlySalary.toString() },
         apply = { s, t -> t.toLongOrNull()?.takeIf { it > 0 }?.let { s.copy(monthlySalary = it) } },
     ),
     SettingItem(
         label = "Auxilio de transporte o conectividad",
-        error = "Escribe el valor del auxilio, o 0 si no tienes.",
-        help = "Viene con el valor de ley según tu salario. Cámbialo solo si tu empresa paga otro.",
-        isMoney = true,
-        shown = { money(it.monthlyAllowance) },
+        shortLabel = "Auxilio de transporte",
+        error = "",
+        isAllowance = true,
+        shown = {
+            if (it.allowanceHistory.changeAt(LocalDate.now()).isLegal) "Ley · ${money(it.monthlyAllowance)}" else money(it.monthlyAllowance)
+        },
         text = { it.monthlyAllowance.toString() },
-        apply = { s, t -> t.toLongOrNull()?.let { s.copy(monthlyAllowance = it) } },
+        apply = { s, _ -> s },
     ),
     SettingItem(
         label = "Día de corte",
@@ -123,6 +132,14 @@ private val SHIFT_ITEMS = listOf(
         apply = { s, t -> t.toIntOrNull()?.takeIf { it in 0..MAX_MARGIN_MINUTES }?.let { s.copy(marginMinutes = it) } },
     ),
     SettingItem(
+        label = "Avisar antes de la salida (minutos)",
+        error = "Escribe los minutos, entre 0 y $MAX_EXIT_NOTICE_MINUTES.",
+        help = "Te llega una notificación normal a esa hora exacta. Escribe 0 para no recibirla.",
+        shown = { if (it.exitNoticeMinutes == 0) "Desactivado" else "${it.exitNoticeMinutes} min antes" },
+        text = { it.exitNoticeMinutes.toString() },
+        apply = { s, t -> t.toIntOrNull()?.takeIf { it in 0..MAX_EXIT_NOTICE_MINUTES }?.let { s.copy(exitNoticeMinutes = it) } },
+    ),
+    SettingItem(
         label = "Duración habitual (horas)",
         error = "Escribe una duración menor de 24 horas.",
         decimal = true,
@@ -139,7 +156,9 @@ private val SHIFT_ITEMS = listOf(
         apply = { s, t -> t.toIntOrNull()?.let { s.copy(breakMinutes = it) } },
     ),
     SettingItem(
-        label = "Aplicar en turnos de más de (horas)",
+        label = "Descontar almuerzo en turnos de más de (horas)",
+        shortLabel = "Solo en turnos de más de",
+        visible = { it.breakMinutes > 0 },
         error = "Escribe un número de horas.",
         decimal = true,
         shown = { hours(it.breakOverMinutes.toLong()) },
@@ -169,9 +188,37 @@ fun SettingsScreen(
     }
 
     editing?.let { item ->
-        SettingSheet(item, settings, viewModel.salaryChangeStart(), onDismiss = { editing = null }) { updated, since ->
-            viewModel.saveSettings(updated, since)
-            editing = null
+        if (item.isSalary) {
+            SalarySheet(
+                history = settings.salaryHistory,
+                suggestedStart = viewModel.salaryChangeStart(),
+                today = viewModel.today(),
+                onDismiss = { editing = null },
+                onSave = {
+                    viewModel.saveSalaryHistory(it)
+                    editing = null
+                },
+                // Quitar un cambio deja la hoja abierta para seguir revisando el historial.
+                onRemove = { viewModel.saveSalaryHistory(it, "Salario quitado") },
+            )
+        } else if (item.isAllowance) {
+            AllowanceSheet(
+                history = settings.allowanceHistory,
+                salary = settings.salaryHistory,
+                suggestedStart = viewModel.salaryChangeStart(),
+                today = viewModel.today(),
+                onDismiss = { editing = null },
+                onSave = {
+                    viewModel.saveAllowanceHistory(it)
+                    editing = null
+                },
+                onRemove = { viewModel.saveAllowanceHistory(it, "Auxilio quitado") },
+            )
+        } else {
+            SettingSheet(item, settings, onDismiss = { editing = null }) { updated ->
+                viewModel.saveSettings(updated)
+                editing = null
+            }
         }
     }
 }
@@ -294,7 +341,7 @@ private fun SettingsGroup(title: String, items: List<SettingItem>, settings: Use
     GroupTitle(title)
     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(Radius.card), color = TurnosTheme.colors.card) {
         Column {
-            items.forEachIndexed { index, item ->
+            items.filter { it.visible(settings) }.forEachIndexed { index, item ->
                 if (index > 0) HorizontalDivider(Modifier.padding(horizontal = Spacing.md), color = MaterialTheme.colorScheme.surfaceContainer)
                 Row(
                     Modifier
@@ -304,7 +351,7 @@ private fun SettingsGroup(title: String, items: List<SettingItem>, settings: Use
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                 ) {
-                    Text(item.label.substringBefore(" ("), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Text(item.shortLabel ?: item.label.substringBefore(" ("), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                     Text(item.shown(settings), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Icon(
                         Icons.AutoMirrored.Rounded.KeyboardArrowRight,
@@ -321,13 +368,11 @@ private fun SettingsGroup(title: String, items: List<SettingItem>, settings: Use
 private fun SettingSheet(
     item: SettingItem,
     settings: UserSettings,
-    changeStart: LocalDate,
     onDismiss: () -> Unit,
-    onDone: (UserSettings, salarySince: LocalDate) -> Unit,
+    onDone: (UserSettings) -> Unit,
 ) {
     var text by remember { mutableStateOf(item.text(settings)) }
     var showError by remember { mutableStateOf(false) }
-    var retroactive by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
 
@@ -360,26 +405,9 @@ private fun SettingSheet(
         if (showError) {
             Text(item.error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
-        if (item.asksSince && text.trim() != item.text(settings)) {
-            Text("¿Desde cuándo?", style = MaterialTheme.typography.titleSmall)
-            PillTabs(
-                options = listOf("Desde ${changeStart.shortLabel()}", "Corregir todo"),
-                selected = if (retroactive) 1 else 0,
-                onSelect = { retroactive = it == 1 },
-            )
-            Text(
-                if (retroactive) {
-                    "Usa \"Corregir todo\" si el salario anterior estaba mal escrito: se recalculan todos los cortes."
-                } else {
-                    "Los cortes anteriores conservan el salario con que se calcularon."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
         PrimaryAction("Listo", onClick = {
             val updated = item.apply(settings, text.trim())
-            if (updated == null) showError = true else onDone(updated, if (retroactive) SalaryHistory.SINCE_ALWAYS else changeStart)
+            if (updated == null) showError = true else onDone(updated)
         })
     }
 }
