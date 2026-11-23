@@ -130,7 +130,7 @@ private fun OpenShiftNotice(open: Shift, state: UiState, period: PayPeriod) {
  * Con [simulated] la tarjeta es neutra y con borde: es un cálculo de prueba, no lo que te van a pagar.
  */
 @Composable
-fun NetCard(result: Liquidation, simulated: Boolean = false) {
+fun NetCard(result: Liquidation, simulated: Boolean = false, invalidData: Boolean = false) {
     val today = LocalDate.now()
     val payday = result.period.payday.shortLabel()
     val style = if (simulated) {
@@ -154,8 +154,15 @@ fun NetCard(result: Liquidation, simulated: Boolean = false) {
                 },
                 style = MaterialTheme.typography.titleSmall,
             )
-            Text(money(result.net), style = MaterialTheme.typography.displaySmall.tabular())
+            // Con datos inválidos no se muestra un neto calculado con valores que no son los escritos.
+            Text(if (invalidData) "—" else money(result.net), style = MaterialTheme.typography.displaySmall.tabular())
             when {
+                invalidData -> Text(
+                    "Corrige los datos en rojo para ver el neto.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = Spacing.xs),
+                )
                 simulated -> Text(
                     "Es una simulación: no cambia tus turnos ni tu liquidación.",
                     style = MaterialTheme.typography.bodySmall,

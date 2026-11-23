@@ -107,14 +107,26 @@ private val HOUR_GROUPS = listOf(
 )
 
 private fun String.decimalOrNull(): BigDecimal? = replace(',', '.').toBigDecimalOrNull()
-private fun String.keepDecimal(): String = filter { it.isDigit() || it == ',' || it == '.' }
+/** Deja dígitos y un solo separador decimal: "1,5,5" queda "1,55". */
+private fun String.keepDecimal(): String {
+    var separator = false
+    return filter { char ->
+        when {
+            char.isDigit() -> true
+            (char == ',' || char == '.') && !separator -> true.also { separator = true }
+            else -> false
+        }
+    }
+}
 private fun String.keepDigits(): String = filter(Char::isDigit)
 
 private fun BigDecimal.hoursText(): String = stripTrailingZeros().toPlainString().replace('.', ',')
 
 /** Suma [delta] a las horas escritas; en cero el campo queda vacío y vuelve a mostrar el 0 tenue. */
 private fun String.stepped(delta: BigDecimal): String {
-    val next = ((decimalOrNull() ?: BigDecimal.ZERO) + delta).max(BigDecimal.ZERO)
+    // Un valor que no se entiende se deja como está para no borrar lo escrito.
+    val current = if (isEmpty()) BigDecimal.ZERO else decimalOrNull() ?: return this
+    val next = (current + delta).max(BigDecimal.ZERO)
     return if (next.signum() == 0) "" else next.hoursText()
 }
 
@@ -159,6 +171,7 @@ fun ManualLiquidation(
     val percent = percentText.decimalOrNull()
     val divisor = divisorText.toIntOrNull()?.takeIf { it > 0 }
     val anyDataInvalid = salary == null || allowance == null || days == null || percent == null || divisor == null
+    val anyHoursInvalid = draft.hours.values.any { it.isNotEmpty() && it.decimalOrNull() == null }
 
     val input = ManualInput(
         monthlySalary = salary ?: periodSalary,
@@ -178,7 +191,7 @@ fun ManualLiquidation(
     Column(modifier.fillMaxSize().imePadding()) {
         // El neto se queda arriba: se ve cambiar mientras se ingresan las horas.
         Box(Modifier.padding(start = Spacing.md, end = Spacing.md, top = Spacing.sm)) {
-            NetCard(result, simulated = true)
+            NetCard(result, simulated = true, invalidData = anyDataInvalid || anyHoursInvalid)
         }
         Column(
             Modifier
@@ -253,7 +266,7 @@ fun ManualLiquidation(
                 }
             }
 
-            CalculationCard(result, open = detailOpen, onToggle = onToggleDetail, workedLabel = "Horas con recargo o extra", netLabel = "Neto simulado")
+            if (!anyDataInvalid && !anyHoursInvalid) CalculationCard(result, open = detailOpen, onToggle = onToggleDetail, workedLabel = "Horas con recargo o extra", netLabel = "Neto simulado")
         }
     }
 }

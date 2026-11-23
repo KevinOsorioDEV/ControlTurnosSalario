@@ -199,7 +199,8 @@ private fun CheckInContent(state: UiState, now: LocalDateTime, onCheckIn: (Local
         if (policy.minutes > 0) {
             FilledField(
                 value = breakText,
-                onValueChange = { breakOverride = it.filter(Char::isDigit) },
+                // Cuatro cifras bastan; así un número enorme no se vuelve 0 sin avisar.
+                onValueChange = { breakOverride = it.filter(Char::isDigit).take(4) },
                 label = "Almuerzo no pagado (minutos)",
             )
         }

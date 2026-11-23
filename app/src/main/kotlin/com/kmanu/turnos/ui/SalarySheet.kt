@@ -157,7 +157,11 @@ fun SalarySheet(
         AlertDialog(
             onDismissRequest = { removing = null },
             title = { Text("¿Quitar este salario?") },
-            text = { Text("${change.sinceLabel()}: las horas de esas fechas se pagarán con el salario anterior.") },
+            text = {
+                // El tramo más antiguo no tiene uno anterior: sus fechas pasan al siguiente.
+                val replacement = if (change == history.changes.first()) "siguiente" else "anterior"
+                Text("${change.sinceLabel()}: las horas de esas fechas se pagarán con el salario $replacement.")
+            },
             confirmButton = {
                 TextButton(onClick = {
                     history.without(change.from)?.let(onRemove)

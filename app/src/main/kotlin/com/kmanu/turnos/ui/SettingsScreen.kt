@@ -49,8 +49,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** 470 → "7,83": dos decimales bastan y al volver a leerlo da los mismos minutos. */
 private fun Int.minutesAsHoursText(): String =
-    if (this % 60 == 0) (this / 60).toString() else (this / 60.0).toString().replace('.', ',')
+    java.math.BigDecimal(this).divide(java.math.BigDecimal(60), 2, java.math.RoundingMode.HALF_UP)
+        .stripTrailingZeros().toPlainString().replace('.', ',')
 
 private fun String.hoursToMinutes(): Int? = replace(',', '.').toDoubleOrNull()?.let { (it * 60).roundToInt() }
 
@@ -153,7 +155,7 @@ private val SHIFT_ITEMS = listOf(
         help = "Déjalo en 0 si tu turno no incluye almuerzo.",
         shown = { if (it.breakMinutes == 0) "Sin almuerzo" else hours(it.breakMinutes.toLong()) },
         text = { it.breakMinutes.toString() },
-        apply = { s, t -> t.toIntOrNull()?.let { s.copy(breakMinutes = it) } },
+        apply = { s, t -> t.toIntOrNull()?.takeIf { it in 0 until 24 * 60 }?.let { s.copy(breakMinutes = it) } },
     ),
     SettingItem(
         label = "Descontar almuerzo en turnos de más de (horas)",
@@ -163,7 +165,7 @@ private val SHIFT_ITEMS = listOf(
         decimal = true,
         shown = { hours(it.breakOverMinutes.toLong()) },
         text = { it.breakOverMinutes.minutesAsHoursText() },
-        apply = { s, t -> t.hoursToMinutes()?.takeIf { it >= 0 }?.let { s.copy(breakOverMinutes = it) } },
+        apply = { s, t -> t.hoursToMinutes()?.takeIf { it in 0 until 24 * 60 }?.let { s.copy(breakOverMinutes = it) } },
     ),
 )
 
