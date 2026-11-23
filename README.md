@@ -14,7 +14,7 @@ pensión. Todo se guarda solo en el teléfono.
 ## Compilar y probar
 
 ```sh
-./gradlew :domain:test          # pruebas del cálculo
+./gradlew :domain:test          # pruebas del cálculo y de las validaciones
 ./gradlew :app:assembleDebug    # APK de prueba
 ./gradlew :app:lintDebug        # revisión de la app
 ```
@@ -51,10 +51,28 @@ Las reglas cambian por fecha y la app las resuelve según el día trabajado. Rev
 | Diciembre–enero | Salario mínimo y auxilio de transporte del año (decretos) | `domain/.../LegalPay.kt` → `VALUES` |
 | Diciembre–enero | Festivos nuevos o trasladados por ley | `domain/.../ColombiaHolidays.kt` |
 | 1 de julio | Recargo dominical (Ley 2466 de 2025: 80 % → 90 % → 100 % en 2027) | `domain/.../LaborRules.kt` |
-| 15 de julio | Jornada máxima (Ley 2101 de 2021: 230 → 220 → 210 h) | `domain/.../LaborRules.kt` |
+| 15 de julio | Jornada máxima (Ley 2101 de 2021: 240 → 235 → 230 → 220 → 210 h desde 2023) | `domain/.../LaborRules.kt` |
 
-Si falta el decreto de un año, la app usa el último conocido y lo avisa en Liquidación.
+`LegalPay` tiene los valores desde 2020. Si falta el decreto de un año, la app usa el último
+conocido y lo avisa en Liquidación; para fechas anteriores a 2020 usa los de 2020.
 Después de cada cambio, agrega una prueba en `domain/src/test` con un caso del año nuevo.
+
+## Reglas al registrar turnos
+
+Están en `domain/.../ShiftValidation.kt` y aplican al marcar, al editar y al cerrar un turno:
+
+- El almuerzo se compara con el turno **programado**, no con lo trabajado. Si se entra tarde o
+  se sale temprano, el turno se puede cerrar y la nómina recorta el almuerzo a lo trabajado.
+  Un almuerzo igual o mayor que el turno programado se rechaza desde la entrada.
+- La salida no puede ser una hora que aún no llega, ni el turno durar 24 horas o más.
+- La pregunta por horas extra compara por minutos, igual que el pago: unos segundos de más no
+  cuentan como extra.
+- Un turno marcado en una fecha cuyo tramo pagado cae en otro corte (por el margen de
+  puntualidad) aparece en ese corte, en la lista y en el Excel.
+
+Al restaurar una copia de seguridad se rechaza el archivo entero si está dañado: sin versión,
+con turnos de ids repetidos, más de un turno abierto, salida antes de la entrada o minutos
+negativos. Los historiales de salario y auxilio guardados se leen igual de estrictos.
 
 ## Base de datos
 
