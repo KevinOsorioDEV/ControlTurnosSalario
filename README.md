@@ -44,14 +44,26 @@ y eso borra los datos. Antes, guarda una copia en **Ajustes → Tus datos**.
 
 ## Actualización de valores legales
 
-Las reglas cambian por fecha y la app las resuelve según el día trabajado. Revisa cada año:
+Las reglas cambian por fecha y la app las resuelve según el día trabajado: un corte que cruza
+un cambio paga cada hora con la regla vigente ese día.
+
+### Hay que actualizar cada año
 
 | Cuándo | Qué | Dónde |
 |---|---|---|
 | Diciembre–enero | Salario mínimo y auxilio de transporte del año (decretos) | `domain/.../LegalPay.kt` → `VALUES` |
 | Diciembre–enero | Festivos nuevos o trasladados por ley | `domain/.../ColombiaHolidays.kt` |
-| 1 de julio | Recargo dominical (Ley 2466 de 2025: 80 % → 90 % → 100 % en 2027) | `domain/.../LaborRules.kt` |
-| 15 de julio | Jornada máxima (Ley 2101 de 2021: 240 → 235 → 230 → 220 → 210 h desde 2023) | `domain/.../LaborRules.kt` |
+
+### Ya programado (no requiere cambios)
+
+Están en `domain/.../LaborRules.kt` con sus fechas; la app cambia sola el día indicado. Solo hay
+que tocarlos si una ley nueva modifica estos valores.
+
+| Qué | Cambios | Ley |
+|---|---|---|
+| Recargo dominical y festivo | 75 % → 80 % (1-07-2025) → 90 % (1-07-2026) → 100 % (1-07-2027) | Ley 2466 de 2025 |
+| Divisor de horas del mes | 240 → 235 (15-07-2023) → 230 (15-07-2024) → 220 (15-07-2025) → 210 (15-07-2026) | Ley 2101 de 2021 |
+| Inicio de la jornada nocturna | 9:00 p. m. → 7:00 p. m. (25-12-2025) | Ley 2466 de 2025 |
 
 `LegalPay` tiene los valores desde 2020. Si falta el decreto de un año, la app usa el último
 conocido y lo avisa en Liquidación; para fechas anteriores a 2020 usa los de 2020.
