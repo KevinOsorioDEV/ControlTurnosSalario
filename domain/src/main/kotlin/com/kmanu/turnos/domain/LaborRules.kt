@@ -25,6 +25,9 @@ data class LaborRules(
         /** Ley 2101 de 2021 (jornada) y Ley 2466 de 2025 (dominical y jornada nocturna). */
         fun at(date: LocalDate): LaborRules = LaborRules(
             monthlyHours = when {
+                // Ley 2101: 48 h semanales hasta el 14-07-2023 y luego una hora menos cada año.
+                date < LocalDate.of(2023, 7, 15) -> 240
+                date < LocalDate.of(2024, 7, 15) -> 235
                 date < LocalDate.of(2025, 7, 15) -> 230
                 date < LocalDate.of(2026, 7, 15) -> 220
                 else -> 210

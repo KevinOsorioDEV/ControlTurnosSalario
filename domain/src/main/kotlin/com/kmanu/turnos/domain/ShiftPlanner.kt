@@ -3,6 +3,7 @@ package com.kmanu.turnos.domain
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.temporal.ChronoUnit
 
 /** Ubica un horario programado en fechas concretas. */
 object ShiftPlanner {
@@ -41,9 +42,14 @@ object ShiftPlanner {
         return time.toLocalDate().atStartOfDay().plusMinutes(rounded)
     }
 
-    /** Si la salida se pasó del margen y hay que preguntar si las extras fueron autorizadas. */
+    /**
+     * Si la salida se pasó del margen y hay que preguntar si las extras fueron autorizadas. Se
+     * compara por minutos, igual que se paga: unos segundos de más no son una hora extra.
+     */
     fun needsExtraConfirmation(shift: Shift, exit: LocalDateTime): Boolean =
-        shift.scheduledStart != null && exit.isAfter(shift.scheduledEnd.plusMinutes(shift.marginMinutes.toLong()))
+        shift.scheduledStart != null &&
+            exit.truncatedTo(ChronoUnit.MINUTES)
+                .isAfter(shift.scheduledEnd.truncatedTo(ChronoUnit.MINUTES).plusMinutes(shift.marginMinutes.toLong()))
 
     /** Cuándo recordar que falta marcar la salida de [shift]. */
     fun reminderAt(shift: Shift): LocalDateTime =

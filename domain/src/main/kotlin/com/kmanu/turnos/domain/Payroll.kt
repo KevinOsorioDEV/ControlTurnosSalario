@@ -183,6 +183,21 @@ object PayrollCalculator {
         }
     }
 
+    /**
+     * Turnos que se muestran en [period]: los que empiezan o terminan en él y los que, por el
+     * margen, tienen minutos pagados en él aunque se hayan marcado en otra fecha. Los abiertos
+     * se muestran por su fecha de entrada.
+     */
+    fun shiftsOf(shifts: List<Shift>, period: PayPeriod): List<Shift> {
+        val from = period.noveltiesFrom.atStartOfDay()
+        val to = period.noveltiesTo.plusDays(1).atStartOfDay()
+        return shifts.filter { shift ->
+            val end = shift.end
+            val byDate = shift.start.toLocalDate() in period || (end != null && end.toLocalDate() in period)
+            byDate || paidInterval(shift)?.let { it.start < to && it.end > from } == true
+        }
+    }
+
     /** El salario del mes es el vigente el día de pago; cada hora, el vigente el día trabajado. */
     fun liquidate(shifts: List<Shift>, settings: PaySettings, period: PayPeriod): Liquidation {
         val breakdown = accumulate(shiftsIn(shifts, period), settings.salary, null, period::contains)

@@ -61,11 +61,7 @@ data class UiState(
     val openShift: Shift? by lazy { shifts.firstOrNull { it.end == null } }
     val lastClosedShift: Shift? by lazy { shifts.firstOrNull { it.end != null } }
 
-    val periodShifts: List<Shift> by lazy {
-        shifts.filter { shift ->
-            shift.start.toLocalDate() in period || shift.end?.toLocalDate()?.let { it in period } == true
-        }
-    }
+    val periodShifts: List<Shift> by lazy { PayrollCalculator.shiftsOf(shifts, period) }
 
     val liquidation: Liquidation by lazy { PayrollCalculator.liquidate(shifts, settings.paySettings, period) }
 
@@ -214,7 +210,7 @@ class AppViewModel(
                 val shifts = repository.shifts.first()
                 val settings = settingsStore.settings.first()
                 val now = now()
-                ShiftValidation.validateCheckIn(scheduledEnd, shifts, now)?.let {
+                ShiftValidation.validateCheckIn(scheduledEnd, shifts, now, scheduledStart, breakMinutes)?.let {
                     _messages.emit(it)
                     return@withLock
                 }

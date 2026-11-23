@@ -62,10 +62,13 @@ class AllowanceHistory(changes: List<AllowanceChange>) {
             text.split(';')
                 .filter(String::isNotBlank)
                 .map { entry ->
-                    val (date, amount) = entry.split('=').map(String::trim)
-                    AllowanceChange(LocalDate.parse(date), if (amount == LEGAL_TEXT) null else amount.toLong())
+                    val parts = entry.split('=').map(String::trim)
+                    require(parts.size == 2) { "Tramo dañado: $entry" }
+                    val (date, amount) = parts
+                    val value = if (amount == LEGAL_TEXT) null else amount.toLong().also { require(it >= 0) { "Auxilio negativo: $entry" } }
+                    AllowanceChange(LocalDate.parse(date), value)
                 }
-                .takeIf { it.isNotEmpty() }
+                .takeIf { it.isNotEmpty() && it.distinctBy(AllowanceChange::from).size == it.size }
                 ?.let(::AllowanceHistory)
         }.getOrNull()
     }

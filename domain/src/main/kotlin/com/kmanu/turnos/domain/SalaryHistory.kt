@@ -65,11 +65,17 @@ class SalaryHistory(changes: List<SalaryChange>) {
             text.split(';')
                 .filter(String::isNotBlank)
                 .map { entry ->
-                    val (date, salary) = entry.split('=').map(String::trim)
+                    val parts = entry.split('=').map(String::trim)
+                    require(parts.size == 2) { "Tramo dañado: $entry" }
+                    val (date, salary) = parts
                     val from = LocalDate.parse(date)
-                    if (salary == MINIMUM_WAGE) SalaryChange.minimumWage(from) else SalaryChange(from, salary.toLong())
+                    if (salary == MINIMUM_WAGE) {
+                        SalaryChange.minimumWage(from)
+                    } else {
+                        SalaryChange(from, salary.toLong().also { require(it >= 0) { "Salario negativo: $entry" } })
+                    }
                 }
-                .takeIf { it.isNotEmpty() }
+                .takeIf { it.isNotEmpty() && it.distinctBy(SalaryChange::from).size == it.size }
                 ?.let(::SalaryHistory)
         }.getOrNull()
     }

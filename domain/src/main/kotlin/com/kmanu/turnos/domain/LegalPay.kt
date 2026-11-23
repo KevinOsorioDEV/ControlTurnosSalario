@@ -15,7 +15,13 @@ object LegalPay {
         val allowanceSalaryLimit: Long get() = minimumWage * ALLOWANCE_LIMIT_IN_MINIMUM_WAGES
     }
 
+    // Antes del primer año registrado se usan sus valores; por eso se guardan varios años atrás.
     private val VALUES = sortedMapOf(
+        2020 to YearValues(minimumWage = 877_803, allowance = 102_854),
+        2021 to YearValues(minimumWage = 908_526, allowance = 106_454),
+        2022 to YearValues(minimumWage = 1_000_000, allowance = 117_172),
+        2023 to YearValues(minimumWage = 1_160_000, allowance = 140_606),
+        2024 to YearValues(minimumWage = 1_300_000, allowance = 162_000),
         2025 to YearValues(minimumWage = 1_423_500, allowance = 200_000),
         2026 to YearValues(minimumWage = 1_750_905, allowance = 249_095),
     )

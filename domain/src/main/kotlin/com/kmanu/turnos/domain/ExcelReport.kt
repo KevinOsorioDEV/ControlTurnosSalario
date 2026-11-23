@@ -53,8 +53,8 @@ object ExcelReport {
     private data class Item(val shift: Shift, val breakdown: ShiftBreakdown)
 
     fun write(output: OutputStream, workerName: String, shifts: List<Shift>, settings: PaySettings, period: PayPeriod) {
-        val items = shifts
-            .filter { shift -> shift.end != null && (shift.start.toLocalDate() in period || shift.end.toLocalDate() in period) }
+        val items = PayrollCalculator.shiftsOf(shifts, period)
+            .filter { it.end != null }
             .sortedBy { it.start }
             .map { Item(it, PayrollCalculator.breakdown(it, settings.salary, includeDate = period::contains)) }
         val liquidation = PayrollCalculator.liquidate(shifts, settings, period)
@@ -65,7 +65,7 @@ object ExcelReport {
             zip.entry("xl/workbook.xml", WORKBOOK)
             zip.entry("xl/_rels/workbook.xml.rels", WORKBOOK_RELS)
             zip.entry("xl/styles.xml", STYLES)
-            zip.entry("xl/worksheets/sheet1.xml", sheetXml(shiftsSheet(workerName, items, liquidation), SHIFT_WIDTHS))
+            zip.entry("xl/worksheets/sheet1.xml", sheetXml(shiftsSheet(workerName, items, liquidation), shiftWidths(items)))
             zip.entry("xl/worksheets/sheet2.xml", sheetXml(extrasSheet(items), EXTRA_WIDTHS))
         }
     }
@@ -215,6 +215,15 @@ object ExcelReport {
     }
 
     private val SHIFT_WIDTHS = listOf(36, 12, 11, 11, 11, 11, 9, 9, 9, 9, 9, 9, 9, 9, 9, 40)
+    private const val NO_REST_WIDTH = 12
+
+    /** La columna "sin compensatorio" va antes de Observaciones, que conserva su ancho. */
+    private fun shiftWidths(items: List<Item>): List<Int> =
+        if (items.any { it.breakdown.minutesOf(Concept.SUNDAY_NO_REST) > 0 }) {
+            SHIFT_WIDTHS.dropLast(1) + NO_REST_WIDTH + SHIFT_WIDTHS.last()
+        } else {
+            SHIFT_WIDTHS
+        }
     private val EXTRA_WIDTHS = listOf(12, 12, 12, 10, 40, 12, 24, 40)
 
     private const val CONTENT_TYPES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>"""

@@ -17,6 +17,7 @@ data class BackupData(
 object Backup {
     private const val FORMAT = "turnos-respaldo"
     private const val VERSION = 1L
+    private const val DAMAGED = "La copia de seguridad está dañada."
 
     fun encode(data: BackupData): String = Json.write(
         linkedMapOf(
@@ -34,8 +35,10 @@ object Backup {
     fun decode(text: String): BackupData {
         val root = runCatching { Json.parse(text) }.getOrNull() as? Map<*, *>
         require(root != null && root["formato"] == FORMAT) { "El archivo no es una copia de seguridad de Turnos." }
-        val version = (root["version"] as? Long) ?: 0
-        require(version in 1..VERSION) { "La copia es de una versión más nueva de la app. Actualiza Turnos." }
+        // Sin versión, o con una que no es un entero positivo, la copia está dañada; 1.0 vale como 1.
+        val version = (root["version"] as? Number)?.toDouble()?.takeIf { it >= 1 && it % 1 == 0.0 }
+        require(version != null) { DAMAGED }
+        require(version <= VERSION) { "La copia es de una versión más nueva de la app. Actualiza Turnos." }
         return runCatching {
             val salary = (root["salarios"] as List<*>).map { entry ->
                 val map = entry as Map<*, *>
@@ -46,12 +49,28 @@ object Backup {
                     minimumWage = map["minimo"] as? Boolean ?: false,
                 )
             }
+            val shifts = (root["turnos"] as List<*>).map { shiftFromMap(it as Map<*, *>) }
+            checkShifts(shifts)
             BackupData(
-                shifts = (root["turnos"] as List<*>).map { shiftFromMap(it as Map<*, *>) },
+                shifts = shifts,
                 salary = SalaryHistory(salary),
-                settings = (root["ajustes"] as Map<*, *>).entries.associate { (key, value) -> key.toString() to value.toString() },
+                // Un ajuste nulo se omite para que la app use su valor por defecto.
+                settings = (root["ajustes"] as Map<*, *>).entries
+                    .filter { it.value != null }
+                    .associate { (key, value) -> key.toString() to value.toString() },
             )
-        }.getOrElse { throw IllegalArgumentException("La copia de seguridad está dañada.", it) }
+        }.getOrElse { throw IllegalArgumentException(DAMAGED, it) }
+    }
+
+    /** Una copia editada a mano o corrupta no debe meter turnos imposibles en la base. */
+    private fun checkShifts(shifts: List<Shift>) {
+        require(shifts.map { it.id }.toSet().size == shifts.size) { "Turnos con el mismo id." }
+        require(shifts.count { it.end == null } <= 1) { "Más de un turno abierto." }
+        shifts.forEach { shift ->
+            require(shift.end == null || shift.end.isAfter(shift.start)) { "Salida antes de la entrada: ${shift.id}" }
+            require(shift.scheduledEnd.isAfter(shift.start)) { "Salida programada antes de la entrada: ${shift.id}" }
+            require(shift.breakMinutes >= 0 && shift.marginMinutes >= 0) { "Minutos negativos: ${shift.id}" }
+        }
     }
 
     private fun shiftToMap(shift: Shift): Map<String, Any?> = linkedMapOf(
